@@ -1,7 +1,7 @@
 import pandas
 import netsquid as ns
 import pydynaa as pd
-from netsquid.components import QSource, SourceStatus, GaussianDelayModel
+from netsquid.components import SourceStatus, GaussianDelayModel
 from netsquid.components import QuantumChannel, FibreLossModel
 from netsquid.components.models import QuantumErrorModel
 from netsquid.components import instructions as instr
@@ -11,6 +11,8 @@ from netsquid.protocols import LocalProtocol, NodeProtocol, Signals
 from netsquid.qubits import StateSampler, QFormalism, ketstates as ks
 from netsquid.qubits import qubitapi as qapi, operators as ops
 from netsquid.util.datacollector import DataCollector
+
+from qsource import QSource                                                                                             # use localy modified version of QSource
 
 
 class RepeaterProtocol(NodeProtocol):

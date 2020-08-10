@@ -215,7 +215,7 @@ class QSource(Component):
                  output_meta=None, properties=None, **kwargs):
         self._output_port_names = ["qout{}".format(idx) for idx in range(num_ports)]
         if properties is None:
-            properties = {}
+            properties = {"is_number_state": False}
         if models is None:
             models = {}
         if "emission_delay_model" in kwargs:
