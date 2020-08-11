@@ -71,10 +71,9 @@ class RepeaterProtocol(NodeProtocol):
         else:
             self.start_subprotocols()
             while True:
-                self.result = {"meas": None}
+                # self.result = {"meas": None}                                                                            # FIXME: Verify this is needed
                 expr = yield self.await_signal(self.subprotocols["route_node_A"], Signals.SUCCESS) | \
                              self.await_signal(self.subprotocols["route_node_B"], Signals.SUCCESS)                      # wait for incoming qubit(s) to be successfully stored
-
                 if expr.first_term.value:                                                                               # update used memory slots with result from either signal
                     mem_pos = self.subprotocols["route_node_A"].get_signal_result(label=Signals.SUCCESS, receiver=self)
                     self.qubits_A.append(mem_pos)
@@ -84,18 +83,21 @@ class RepeaterProtocol(NodeProtocol):
 
 
                 while (len(self.qubits_A) > 0) and (len(self.qubits_B) > 0):                                            # both qubits from node_A and node_B are available in qmemory
-                    arr = list(range(0, len(self.node.qmemory.mem_positions)))
-                    print(self.node.qmemory.peek()[0].qstate.dm)
-                    print(self.node.qmemory.delta_time(positions=arr))                                                  # FIXME: For analysis only
+                    # arr = list(range(0, len(self.node.qmemory.mem_positions)))
+                    # print(self.node.qmemory.peek(self.qubits_A[-1])[0].qstate.dm)
+                    # print(self.node.qmemory.delta_time(positions=arr))                                                  # FIXME: For analysis only
                     measure_program = BellMeasurementProgram()
                     self.node.qmemory.execute_program(measure_program, [self.qubits_A[-1], self.qubits_B[-1]])
                     yield self.await_program(self.node.qmemory)
+
                     m, = measure_program.output["BellStateIndex"]
                     m0, m1 = self._bsm_results[m]
-                    self.qubits_A.pop()
-                    self.qubits_B.pop()
-                    self.result = {"meas": [m0,m1]}
-                    self.send_signal(Signals.SUCCESS,result=self.result)                                                # FIXME: Could this cause issues if keeping track of elapsed time is important?
+                    measurement = [m0, m1]
+                    result = {
+                        "meas": measurement,
+                        "slots": [self.qubits_A.pop(), self.qubits_B.pop()]
+                    }
+                    self.send_signal(Signals.SUCCESS,result=result)                                                # FIXME: Could this cause issues if keeping track of elapsed time is important?
 
     def _run_no_mem(self):                                                                                              # special run case for when memory should not store qubit for any measurable time
         while True:
@@ -112,8 +114,12 @@ class RepeaterProtocol(NodeProtocol):
                 yield self.await_program(self.node.qmemory)
                 m, = measure_program.output["BellStateIndex"]
                 m0, m1 = self._bsm_results[m]
-                self.result = {"meas": [m0, m1]}
-                self.send_signal(Signals.SUCCESS, result=self.result)                                                   # FIXME: Could this cause issues if keeping track of elapsed time is important?
+                measurement = [m0, m1]
+                result = {
+                    "meas": measurement,
+                    "slots": [0,1]                                                                                      # "no_mem" always accessed slots [0,1] for use with qprocessor (non-physical to avoid qmemory error)
+                }
+                self.send_signal(Signals.SUCCESS, result=result)  # FIXME: Could this cause issues if keeping track of elapsed time is important?
 
 
 class BellMeasurementProgram(QuantumProgram):
@@ -127,13 +133,13 @@ class BellMeasurementProgram(QuantumProgram):
     def program(self):
         q1, q2 = self.get_qubit_indices(2)
         self.apply(instr.INSTR_MEASURE_BELL, [q1, q2],
-                   inplace=False,
-                   output_key="BellStateIndex")
+                   inplace=True,
+                   output_key="BellStateIndex")                                                                         # "inplace"-> True: program won't discard qubits, allow SimProtocol to inspect and then discard
         yield self.run()
 
 
 class RouteQubits(NodeProtocol):
-    """Subprotocol of "RepeaterProtocol": manages routing incoming qubits no memory
+    """Subprotocol of "RepeaterProtocol": manages routing incoming qubits
 
     * Determines location of available slot (if any)
     * Places qubit into memory slot
@@ -168,6 +174,7 @@ class RouteQubits(NodeProtocol):
             yield self.await_port_input(self.port)                                                                      # wait for incoming qubit
             message = self.port.rx_input()
             qubit = message.items[0]
+            print(f"[At {ns.sim_time()}]: Arriving from {self.port.name}: {qubit} \n qstate: \n{qubit.qstate.dm}\n")
             mem_pos = self._get_unused_slot(self.slots)
             if mem_pos is not None:
                 self.node.qmemory.put(qubit, positions=mem_pos)
@@ -235,30 +242,34 @@ class SimulationProtocol(LocalProtocol):
         self.start_subprotocols()
         while True:
             yield self.await_signal(self.subprotocols["repeater_R"], Signals.SUCCESS)
-            result = self.subprotocols["repeater_R"].get_signal_result(label=Signals.SUCCESS, receiver=self)
+            repeater_result = self.subprotocols["repeater_R"].get_signal_result(label=Signals.SUCCESS, receiver=self)
+            slots = repeater_result["slots"]
+            measurement = repeater_result["meas"]
+            q1,q2 = self.subprotocols["repeater_R"].node.qmemory.pop(slots)                                             # grab/remove qubits after measurement
+            # print(q1.qstate.dm)
+            # print(q2.qstate.dm)
+            result = {
+                "meas": measurement,
+                "sim_time": ns.sim_time(),
+            }
+
             self.send_signal(Signals.SUCCESS, result=result)
 
 
 # class FreeSpaceErrorModel(QuantumErrorModel):                                                                           # FIXME: In development
-#     def __init__(self, aperature_tx, aperature_rx, length, **kwargs):
-#         super().__init__(**kwargs)
-#         self._properties.update({'aperature_rx': aperature_rx, 'aperature_tx': aperature_tx, 'length': length})
+#     def __init__(self, static_loss_prob, length, amplitude_damp_rate):
+#         super().__init__()
+#         self._properties.update({'static_loss_prob': static_loss_prob,  'length': length,
+#                                  'amplitude_damp_rate': amplitude_damp_rate})
+#
 #
 #     @property
-#     def aperature_rx(self):
-#         return self._properties['aperature_rx']
+#     def static_loss_prob(self):
+#         return self._properties['static_loss_prob']
 #
-#     @aperature_rx.setter
-#     def aperature_rx(self, value):
-#         self._properties['aperature_rx'] = value
-#
-#     @property
-#     def aperature_tx(self):
-#         return self._properties['aperature_tx']
-#
-#     @aperature_tx.setter
-#     def aperature_tx(self, value):
-#         self._properties['aperature_tx'] = value
+#     @static_loss_prob.setter
+#     def static_loss_prob(self, value):
+#         self._properties['static_loss_prob'] = value
 #
 #     @property
 #     def length(self):
@@ -267,6 +278,31 @@ class SimulationProtocol(LocalProtocol):
 #     @length.setter
 #     def length(self, value):
 #         self._properties['length'] = value
+#
+#     @property
+#     def amplitude_damp_rate(self):
+#         return self._properties['amplitude_damp_rate']
+#
+#     @amplitude_damp_rate.setter
+#     def amplitude_damp_rate(self, value):
+#         self._properties['amplitude_damp_rate'] = value
+#
+#     def error_operation(self, qubits, delta_time=0, **kwargs):
+#         """Error operation to apply to qubits.
+#
+#         Parameters
+#         ----------
+#         qubits : tuple of :obj:`~netsquid.qubits.qubit.Qubit`
+#             Qubits to apply noise to.
+#         delta_time : float, optional
+#             Time qubits have spent on a component [ns].
+#
+#         """
+#         for idx, qubit in enumerate(qubits):
+#             if qubit is None:
+#                 continue
+#             prob_loss = 1 - (1 - self.p_loss_init) * np.power(10, - kwargs['length'] * self.p_loss_length / 10)
+#             self.lose_qubit(qubits, idx, prob_loss, rng=self.properties['rng'])
 
 
 
@@ -284,6 +320,7 @@ def setup_network(channel_model, channel_length, memory_model, memory_depth,
                        num_ports=1,
                        status=SourceStatus.INTERNAL,
                        timing_model=source_model,
+                       properties={"is_number_state": True},                                                            # set source to generate 'number_state' qubits. aka photons to be dampened in channel (etc)
                        output_meta={"qm_replace": False})                                                               # failsafe, preventing qubits in memory from being replaced by newer ones
     node_a.add_subcomponent(source_a)
 
@@ -293,6 +330,7 @@ def setup_network(channel_model, channel_length, memory_model, memory_depth,
                        num_ports=1,
                        status=SourceStatus.INTERNAL,
                        timing_model=source_model,
+                       properties={"is_number_state": True},                                                            # set source to generate 'number_state' qubits. aka photons to be dampened in channel (etc)
                        output_meta={"qm_replace": False})                                                               # failsafe, preventing qubits in memory from being replaced by newer ones
     node_b.add_subcomponent(source_b)
 
@@ -360,7 +398,7 @@ def run_simulation(duration, memory_depths):
         source_model = GaussianDelayModel(delay_mean=period, delay_std=0.0)                                             # model for emission_delay, std determines uncertainty/error
         channel_length = 50                                                                                             # single channel length in [km]
         channel_model = {"quantum_loss_model": FibreLossModel(p_loss_init=0.1, p_loss_length=0.005)}                   # FIXME: using arbitrary loss model to force losses in channel
-        # channel_model = {"quantum_loss_model": DephaseNoiseModel(dephase_rate=0.5, time_independent=True)}              # FIXME: using arbitrary loss model to force losses in channel
+        # channel_model = {"quantum_loss_model": DephaseNoiseModel(dephase_rate=0.2, time_independent=True)}              # FIXME: using arbitrary loss model to force losses in channel
         # channel_model = {"quantum_loss_model": DepolarNoiseModel(depolar_rate=0.3, time_independent=True)}              # FIXME: using arbitrary loss model to force losses in channel
 
         # memory_model = DephaseNoiseModel(dephase_rate=0.2, time_independent=True)                                             # FIXME: using arbitrary noise model to apply noise to stored qubits
@@ -368,7 +406,7 @@ def run_simulation(duration, memory_depths):
         # phys_instructions = [PhysicalInstruction(instr.INSTR_MEASURE_BELL, duration=5.0, parallel=True)]
 
         network = setup_network(channel_model=channel_model, channel_length=channel_length,
-                                memory_model=memory_model, memory_depth=memory_depth, source_model=source_model)        # FIXME: Noise not actualy impacting qubits
+                                memory_model=None, memory_depth=memory_depth, source_model=source_model)
 
         if memory_depth == 0:
             use_memory = False
@@ -377,6 +415,7 @@ def run_simulation(duration, memory_depths):
         entangle_sim, dc = sim_setup(network, use_memory)
         entangle_sim.start()
         stats = ns.sim_run(duration=duration)
+        print(dc.dataframe.head(30))
         if dc.dataframe.empty:
             df = pandas.DataFrame({"num_meas" : [0], "mem_depth" : [memory_depth]})
         else:
@@ -400,9 +439,10 @@ def repeat_simulation(iterations, duration, memory_depths):
 
 def create_plot():
     from matplotlib import pyplot as plt
-    memory_depths = [0,1,2,3,4,5,6,7,8,9]
-    iterations = 10
-    duration = 100
+    # memory_depths = [0,1,2,3,4,5,6,7,8,9]
+    memory_depths = [1]
+    iterations = 1
+    duration = 10
     total_data = repeat_simulation(iterations, duration, memory_depths)
     data = total_data.groupby("mem_depth")['num_meas'].agg(num_meas='mean', sem='sem').reset_index()
     plt.errorbar('mem_depth', 'num_meas', yerr='sem', capsize=4, ecolor='k', fmt='bo-', markersize=4, data=data)
