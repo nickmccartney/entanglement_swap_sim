@@ -13,6 +13,7 @@ from netsquid.qubits import qubitapi as qapi, operators as ops
 from netsquid.util.datacollector import DataCollector
 
 from qsource import QSource                                                                                             # use localy modified version of QSource
+from FreeSpaceErrorModel import FreeSpaceErrorModel
 
 
 class RepeaterProtocol(NodeProtocol):
@@ -252,89 +253,7 @@ class SimulationProtocol(LocalProtocol):
                 "q1": q1,
                 "q2": q2
             }
-
             self.send_signal(Signals.SUCCESS, result=result)
-
-
-import math
-import numpy as np
-from netsquid.util import simtools
-
-class FreeSpaceErrorModel(QuantumErrorModel):                                                                           # FIXME: In development (move to seperate file)
-    def __init__(self, static_loss_prob, length, amplitude_damp_rate, rng=None):
-        super().__init__()
-        self._properties.update({'rng': rng, 'static_loss_prob': static_loss_prob, 'length': length,
-                                 'amplitude_damp_rate': amplitude_damp_rate})
-
-
-    @property
-    def rng(self):
-        """ :obj:`~numpy.random.RandomState`: Random number generator."""
-        return self.properties['rng']
-
-    @rng.setter
-    def rng(self, value):
-        if not isinstance(value, np.random.RandomState):
-            raise TypeError("{} is not a valid numpy RandomState".format(value))
-        self.properties['rng'] = value
-
-    @property
-    def static_loss_prob(self):
-        return self._properties['static_loss_prob']
-
-    @static_loss_prob.setter
-    def static_loss_prob(self, value):
-        self._properties['static_loss_prob'] = value
-
-    @property
-    def length(self):
-        return self._properties['length']
-
-    @length.setter
-    def length(self, value):
-        self._properties['length'] = value
-
-    @property
-    def amplitude_damp_rate(self):
-        return self._properties['amplitude_damp_rate']
-
-    @amplitude_damp_rate.setter
-    def amplitude_damp_rate(self, value):
-        self._properties['amplitude_damp_rate'] = value
-
-    @staticmethod
-    def lose_qubit(qubits, qubit_index, prob_loss=1.0, rng=None):                                                       # override of "lose_qubit" method to consider both static qubit loss (using lose_qubit) and noise (using amplitude dampening)
-        qubit = qubits[qubit_index]
-        if rng is None:
-            rng = simtools.get_random_state()
-        if math.isclose(prob_loss, 1.) or rng.random_sample() <= prob_loss:
-            print(math.isclose(prob_loss, 1.0))
-            qapi.discard(qubit)
-            qubits[qubit_index] = None
-
-    def error_operation(self, qubits, delta_time=0, **kwargs):
-        """Error operation to apply to qubits.
-
-        Parameters
-        ----------
-        qubits : tuple of :obj:`~netsquid.qubits.qubit.Qubit`
-            Qubits to apply noise to.
-        delta_time : float, optional
-            Time qubits have spent on a component [ns].
-
-        """
-        for idx, qubit in enumerate(qubits):
-            if qubit is None:
-                continue
-            prob_loss = self.properties["static_loss_prob"]
-            self.lose_qubit(qubits, idx, prob_loss, rng=self.properties["rng"])
-
-        for idx, qubit in enumerate(qubits):
-            if qubit is None:
-                continue
-            noise = self.properties["amplitude_damp_rate"] * self.properties["length"]
-            qapi.amplitude_dampen(qubit, gamma=noise)
-
 
 
 
@@ -344,7 +263,7 @@ def setup_network(channel_model, channel_length, memory_model, memory_depth,
     network = Network("Entanglement_swap")
     node_a, node_b, node_r = network.add_nodes(["node_A", "node_B", "node_R"])
 
-    state_sampler = StateSampler(qs_reprs=[ns.y0], probabilities=[1.0], formalism=QFormalism.DM)                                     # FIXME: Need KET or DM? DM better for noise supposedly
+    state_sampler = StateSampler(qs_reprs=[ks.y0], probabilities=[1.0], formalism=QFormalism.DM)
 
     # Setup end node A:                                                                                                 # for future versions can add qmemory/qproc here too!
     source_a = QSource(name="QSource_node_A",
@@ -352,7 +271,7 @@ def setup_network(channel_model, channel_length, memory_model, memory_depth,
                        num_ports=1,
                        status=SourceStatus.INTERNAL,
                        timing_model=source_model,
-                       properties={"is_number_state": True},                                                            # set source to generate 'number_state' qubits. aka photons to be dampened in channel (etc)
+                       properties={"is_number_state": True},                                                            # set source to generate 'number_state' qubits. aka photons
                        output_meta={"qm_replace": False})                                                               # failsafe, preventing qubits in memory from being replaced by newer ones
     node_a.add_subcomponent(source_a)
 
@@ -362,7 +281,7 @@ def setup_network(channel_model, channel_length, memory_model, memory_depth,
                        num_ports=1,
                        status=SourceStatus.INTERNAL,
                        timing_model=source_model,
-                       properties={"is_number_state": True},                                                            # set source to generate 'number_state' qubits. aka photons to be dampened in channel (etc)
+                       properties={"is_number_state": True},                                                            # set source to generate 'number_state' qubits. aka photons
                        output_meta={"qm_replace": False})                                                               # failsafe, preventing qubits in memory from being replaced by newer ones
     node_b.add_subcomponent(source_b)
 
@@ -429,14 +348,11 @@ def run_simulation(duration, memory_depths):
         period = (1/frequency)*1e9                                                                                      # period in [ns]
         source_model = GaussianDelayModel(delay_mean=period, delay_std=0.0)                                             # model for emission_delay, std determines uncertainty/error
         channel_length = 50                                                                                             # single channel length in [km]
-        # channel_model = {"quantum_loss_model": FibreLossModel(p_loss_init=0.1, p_loss_length=0.005)}                   # FIXME: using arbitrary loss model to force losses in channel
-        # channel_model = {"quantum_loss_model": DephaseNoiseModel(dephase_rate=0.2, time_independent=True)}              # FIXME: using arbitrary loss model to force losses in channel
-        # channel_model = {"quantum_loss_model": DepolarNoiseModel(depolar_rate=0.3, time_independent=True)}              # FIXME: using arbitrary loss model to force losses in channel
+        channel_model = {"quantum_loss_model": FreeSpaceErrorModel(static_loss_prob=0.5,
+                                                                   length=channel_length,
+                                                                   amplitude_damp_rate=0.00)}                          # FIXME: Implementation of free space model with arbitrary loss params
 
-        channel_model = {"quantum_loss_model": FreeSpaceErrorModel(static_loss_prob=0.5, length=channel_length, amplitude_damp_rate=0.001)}
-
-        # memory_model = DephaseNoiseModel(dephase_rate=0.2, time_independent=True)                                             # FIXME: using arbitrary noise model to apply noise to stored qubits
-        memory_model = T1T2NoiseModel(T1=10, T2=8)
+        memory_model = T1T2NoiseModel(T1=10, T2=8)                                                                      # FIXME: using arbitrary noise model to apply noise to stored qubits
         # phys_instructions = [PhysicalInstruction(instr.INSTR_MEASURE_BELL, duration=5.0, parallel=True)]
 
         network = setup_network(channel_model=channel_model, channel_length=channel_length,
@@ -474,7 +390,6 @@ def repeat_simulation(iterations, duration, memory_depths):
 
 def create_plot():
     from matplotlib import pyplot as plt
-    # memory_depths = [0,1,2,3,4,5,6,7,8,9]
     memory_depths = [1]
     iterations = 1
     duration = 100
