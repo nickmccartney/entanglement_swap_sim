@@ -72,7 +72,6 @@ class RepeaterProtocol(NodeProtocol):
         else:
             self.start_subprotocols()
             while True:
-                # self.result = {"meas": None}                                                                            # FIXME: Verify this is needed
                 expr = yield self.await_signal(self.subprotocols["route_node_A"], Signals.SUCCESS) | \
                              self.await_signal(self.subprotocols["route_node_B"], Signals.SUCCESS)                      # wait for incoming qubit(s) to be successfully stored
                 if expr.first_term.value:                                                                               # update used memory slots with result from either signal
@@ -84,43 +83,50 @@ class RepeaterProtocol(NodeProtocol):
 
 
                 while (len(self.qubits_A) > 0) and (len(self.qubits_B) > 0):                                            # both qubits from node_A and node_B are available in qmemory
-                    # arr = list(range(0, len(self.node.qmemory.mem_positions)))
-                    # print(self.node.qmemory.peek(self.qubits_A[-1])[0].qstate.dm)
-                    # print(self.node.qmemory.delta_time(positions=arr))                                                  # FIXME: For analysis only
-                    measure_program = BellMeasurementProgram()
-                    self.node.qmemory.execute_program(measure_program, [self.qubits_A[-1], self.qubits_B[-1]])
-                    yield self.await_program(self.node.qmemory)
-
-                    m, = measure_program.output["BellStateIndex"]
-                    m0, m1 = self._bsm_results[m]
-                    measurement = [m0, m1]
                     result = {
-                        "meas": measurement,
-                        "slots": [self.qubits_A.pop(), self.qubits_B.pop()]
+                         "slots": [self.qubits_A.pop(), self.qubits_B.pop()]
                     }
-                    self.send_signal(Signals.SUCCESS,result=result)                                                # FIXME: Could this cause issues if keeping track of elapsed time is important?
+                    self.send_signal(Signals.SUCCESS, result=result)
+                    # measure_program = BellMeasurementProgram()
+                    # self.node.qmemory.execute_program(measure_program, [self.qubits_A[-1], self.qubits_B[-1]])
+                    # yield self.await_program(self.node.qmemory)
+                    #
+                    # m, = measure_program.output["BellStateIndex"]
+                    # m0, m1 = self._bsm_results[m]
+                    # measurement = [m0, m1]
+                    # result = {
+                    #     "meas": measurement,
+                    # #     "slots": [self.qubits_A.pop(), self.qubits_B.pop()]
+                    # # }
+                    # self.send_signal(Signals.SUCCESS,result=result)                                                   # FIXME: Could this cause issues if keeping track of elapsed time is important?
 
     def _run_no_mem(self):                                                                                              # special run case for when memory should not store qubit for any measurable time
         while True:
             expr = yield self.await_port_input(self.node.ports[self.port_names[0]]) & \
                          self.await_port_input(self.node.ports[self.port_names[1]])                                     # wait until qubits arrive at same time FIXME: possibly give some lenience
-            if expr.first_term.value & expr.second_term.value:
-                rx1 = self.node.ports[self.port_names[0]].rx_input()
-                q1 = rx1.items[0]
-                rx2 = self.node.ports[self.port_names[1]].rx_input()
-                q2 = rx2.items[0]
-                self.node.qmemory.put([q1,q2], positions=[0,1])
-                measure_program = BellMeasurementProgram()
-                self.node.qmemory.execute_program(measure_program, [0, 1])
-                yield self.await_program(self.node.qmemory)
-                m, = measure_program.output["BellStateIndex"]
-                m0, m1 = self._bsm_results[m]
-                measurement = [m0, m1]
-                result = {
-                    "meas": measurement,
-                    "slots": [0,1]                                                                                      # "no_mem" always accessed slots [0,1] for use with qprocessor (non-physical to avoid qmemory error)
-                }
-                self.send_signal(Signals.SUCCESS, result=result)  # FIXME: Could this cause issues if keeping track of elapsed time is important?
+
+            rx1 = self.node.ports[self.port_names[0]].rx_input()
+            rx2 = self.node.ports[self.port_names[1]].rx_input()
+            if rx1 is not None and rx2 is not None:
+                if rx1.items[0] is not None and rx2.items[0] is not None:                                               # FIXME: FIGURE OUT WHY THIS IS NEEDED TO AVOID RX2 SENDING [None]
+                    q1 = rx1.items[0]
+                    q2 = rx2.items[0]
+                    self.node.qmemory.put([q1,q2], positions=[0,1])
+                    result = {
+                        "slots": [0, 1]
+                    }
+                    self.send_signal(Signals.SUCCESS, result=result)
+                # measure_program = BellMeasurementProgram()
+                # self.node.qmemory.execute_program(measure_program, [0, 1])
+                # yield self.await_program(self.node.qmemory)
+                # m, = measure_program.output["BellStateIndex"]
+                # m0, m1 = self._bsm_results[m]
+                # measurement = [m0, m1]
+                # result = {
+                #     "meas": measurement,
+                #     "slots": [0,1]                                                                                      # "no_mem" always accessed slots [0,1] for use with qprocessor (non-physical to avoid qmemory error)
+                # }
+                # self.send_signal(Signals.SUCCESS, result=result)  # FIXME: Could this cause issues if keeping track of elapsed time is important?
 
 
 class BellMeasurementProgram(QuantumProgram):
@@ -245,13 +251,13 @@ class SimulationProtocol(LocalProtocol):
             yield self.await_signal(self.subprotocols["repeater_R"], Signals.SUCCESS)
             repeater_result = self.subprotocols["repeater_R"].get_signal_result(label=Signals.SUCCESS, receiver=self)
             slots = repeater_result["slots"]
-            measurement = repeater_result["meas"]
             q1,q2 = self.subprotocols["repeater_R"].node.qmemory.pop(slots)                                             # grab/remove qubits after measurement FIXME: Figure out actual interpretation of results
+            fid_q1 = qapi.fidelity(q1, ks.y0, squared=True)
+            fid_q2 = qapi.fidelity(q2, ks.y0, squared=True)
             result = {
-                "meas": measurement,
                 "sim_time": ns.sim_time(),
-                "q1": q1,
-                "q2": q2
+                "fid_q1": fid_q1,
+                "fid_q2": fid_q2
             }
             self.send_signal(Signals.SUCCESS, result=result)
 
@@ -346,17 +352,17 @@ def run_simulation(duration, memory_depths):
 
         frequency = 1e9                                                                                                 # frequency in [Hz]
         period = (1/frequency)*1e9                                                                                      # period in [ns]
-        source_model = GaussianDelayModel(delay_mean=period, delay_std=0.0)                                             # model for emission_delay, std determines uncertainty/error
+        source_model = GaussianDelayModel(delay_mean=period, delay_std=0.00)                                             # model for emission_delay, std determines uncertainty/error
         channel_length = 50                                                                                             # single channel length in [km]
-        channel_model = {"quantum_loss_model": FreeSpaceErrorModel(static_loss_prob=0.5,
-                                                                   length=channel_length,
-                                                                   amplitude_damp_rate=0.00)}                          # FIXME: Implementation of free space model with arbitrary loss params
+        channel_model = {"quantum_loss_model": FreeSpaceErrorModel(length=channel_length, static_loss_prob=0.3),
+                         "quantum_noise_model": FreeSpaceErrorModel(length=channel_length, damping_rate=0.005)}         # FIXME: Implementation of free space model with arbitrary loss params
 
-        memory_model = T1T2NoiseModel(T1=10, T2=8)                                                                      # FIXME: using arbitrary noise model to apply noise to stored qubits
+        memory_model = T1T2NoiseModel(T1=10.0, T2=8.0)                                                                  # FIXME: using arbitrary noise model to apply noise to stored qubits
+        # memory_model = T1T2NoiseModel(T1=0.1, T2=0.08)
         # phys_instructions = [PhysicalInstruction(instr.INSTR_MEASURE_BELL, duration=5.0, parallel=True)]
 
         network = setup_network(channel_model=channel_model, channel_length=channel_length,
-                                memory_model=None, memory_depth=memory_depth, source_model=source_model)
+                                memory_model=memory_model, memory_depth=memory_depth, source_model=source_model)
 
         if memory_depth == 0:
             use_memory = False
@@ -364,15 +370,14 @@ def run_simulation(duration, memory_depths):
             use_memory = True
         entangle_sim, dc = sim_setup(network, use_memory)
         entangle_sim.start()
-        stats = ns.sim_run(duration=duration)
-        print(dc.dataframe.head(30))
-        print(stats)
-        if dc.dataframe.empty:
-            df = pandas.DataFrame({"num_meas" : [0], "mem_depth" : [memory_depth]})
+        ns.sim_run(duration=duration)
+        if dc.dataframe.empty:                                                                                          # FIXME: Ignore this case for now
+            print("WARNING IN EMPTY CASE")
+            dc.dataframe["mem_depth"] = memory_depth
         else:
-            num_meas = len(dc.dataframe["meas"])
-            df = pandas.DataFrame({"num_meas": [num_meas], "mem_depth": [memory_depth]})
-        simulation_data = simulation_data.append(df)
+            dc.dataframe["mem_depth"] = memory_depth
+            dc.dataframe["num_meas"] = dc.dataframe["sim_time"].size                                                    # add data on number of measurements for each run
+        simulation_data = simulation_data.append(dc.dataframe)
         ns.sim_reset()                                                                                                  # FIXME: Critical component, should it be a full reset though?
     return simulation_data
 
@@ -381,26 +386,43 @@ def repeat_simulation(iterations, duration, memory_depths):
     total_data = pandas.DataFrame()
     for i in range(iterations):
         simulation_data = run_simulation(duration, memory_depths)
-        iteration_data = simulation_data.groupby("mem_depth")['num_meas'].agg(num_meas='mean').reset_index()
-        print(f"ON ITERATION {i} MEASURED: ")
-        print(f"{iteration_data} \n")
-        total_data = total_data.append(iteration_data)
+        print(f"ON ITERATION: {i}")
+        print(simulation_data)
+        total_data = total_data.append(simulation_data)
     return total_data
 
 
 def create_plot():
     from matplotlib import pyplot as plt
-    memory_depths = [1]
-    iterations = 1
+    memory_depths = [0,1,2,3,4]
+    iterations = 10
     duration = 100
     total_data = repeat_simulation(iterations, duration, memory_depths)
-    data = total_data.groupby("mem_depth")['num_meas'].agg(num_meas='mean', sem='sem').reset_index()
-    plt.errorbar('mem_depth', 'num_meas', yerr='sem', capsize=4, ecolor='k', fmt='bo-', markersize=4, data=data)
-    plt.title('Number successful measurements vs memory depth')
-    plt.xlabel('Memory Depth (per connection)')
-    plt.ylabel('# Successful Measurements')
+    q1_data = total_data.groupby("mem_depth")['fid_q1'].agg(fid_q1='mean', sem='sem').reset_index()
+    q2_data = total_data.groupby("mem_depth")['fid_q2'].agg(fid_q2='mean', sem='sem').reset_index()
+
+    measurement_data = total_data.groupby("mem_depth")['num_meas'].agg(num_meas='mean', sem='sem').reset_index()
+
+    plt.figure()
+    plt.subplot(1,2,1)
+    plt.errorbar('mem_depth', 'fid_q1', yerr='sem', capsize=4, ecolor='k', fmt='bo-', markersize=4, data=q1_data, label = 'Fidelity q1')
+    plt.errorbar('mem_depth', 'fid_q2', yerr='sem', capsize=4, ecolor='k', fmt='ro-', markersize=4, data=q2_data, label= 'Fidelity q2')
+    plt.xlabel("Memory Depth (per connection)")
+    plt.ylabel("Fidelity (compared to sent state)")
     plt.grid(True)
+    plt.title("Fidelity vs Memory Depth")
+    plt.legend()
+    plt.plot()
+
+    plt.subplot(1,2,2)
+    plt.bar('mem_depth', 'num_meas', yerr='sem', width=0.5, capsize=10, color='g',ecolor='k', data=measurement_data)
+    plt.xlabel("Memory Depth (per connection)")
+    plt.ylabel("# of (possible) Measurement Events")
+    plt.grid(True)
+    plt.title("Number Measurements vs Memory Depth")
+    plt.suptitle("Analysis: {} Iterations of {} [ns] runs".format(iterations, duration))
     plt.show()
+
 
 
 create_plot()
