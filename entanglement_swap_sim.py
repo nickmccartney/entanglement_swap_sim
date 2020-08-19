@@ -1,6 +1,6 @@
 import pandas
-import netsquid as ns
 import pydynaa as pd
+import netsquid as ns
 from netsquid.components import SourceStatus, Clock, GaussianDelayModel
 from netsquid.components import QuantumChannel
 from netsquid.components import instructions as instr
@@ -9,7 +9,7 @@ from netsquid.components.models import FibreDelayModel
 from netsquid.nodes import Network
 from netsquid.protocols import LocalProtocol, NodeProtocol, Signals
 from netsquid.qubits import StateSampler, QFormalism, ketstates as ks
-from netsquid.qubits import qubitapi as qapi, operators as ops
+from netsquid.qubits import qubitapi as qapi
 from netsquid.util.datacollector import DataCollector
 
 from qsource import QSource                                                                                             # use localy modified version of QSource
@@ -52,8 +52,8 @@ class RepeaterProtocol(NodeProtocol):
                                self.port_names[1])
 
     def _add_subprotocols(self, node, port_name_A, port_name_B):
-        self.add_subprotocol(RouteQubits(node, port_name_A, name="route_node_A"))
-        self.add_subprotocol(RouteQubits(node, port_name_B, name="route_node_B"))
+        self.add_subprotocol(RouteQubits(node, port_name_A, name='route_node_A'))
+        self.add_subprotocol(RouteQubits(node, port_name_B, name='route_node_B'))
 
     def run(self):
         if self.use_memory is False:
@@ -61,18 +61,20 @@ class RepeaterProtocol(NodeProtocol):
         else:
             self.start_subprotocols()
             while True:
-                expr = yield self.await_signal(self.subprotocols["route_node_A"], Signals.SUCCESS) | \
-                             self.await_signal(self.subprotocols["route_node_B"], Signals.SUCCESS)                      # wait for incoming qubit(s) to be successfully stored
+                expr = yield self.await_signal(self.subprotocols['route_node_A'], Signals.SUCCESS) | \
+                             self.await_signal(self.subprotocols['route_node_B'], Signals.SUCCESS)                      # wait for incoming qubit(s) to be successfully stored
                 if expr.first_term.value:                                                                               # update used memory slots with result from either signal
-                    mem_pos = self.subprotocols["route_node_A"].get_signal_result(label=Signals.SUCCESS, receiver=self)
+                    mem_pos = self.subprotocols['route_node_A'].get_signal_result(
+                        label=Signals.SUCCESS, receiver=self)
                     self.qubits_A.append(mem_pos)
                 if expr.second_term.value:
-                    mem_pos = self.subprotocols["route_node_B"].get_signal_result(label=Signals.SUCCESS, receiver=self)
+                    mem_pos = self.subprotocols['route_node_B'].get_signal_result(
+                        label=Signals.SUCCESS, receiver=self)
                     self.qubits_B.append(mem_pos)
 
                 while (len(self.qubits_A) > 0) and (len(self.qubits_B) > 0):                                            # both qubits from node_A and node_B are available in qmemory
                     result = {
-                         "slots": [self.qubits_A.pop(), self.qubits_B.pop()]                                            # FIXME: FIFO vs FILO
+                         'slots': [self.qubits_A.pop(0), self.qubits_B.pop(0)]                                            # FIXME: FIFO vs FILO
                     }
                     self.send_signal(Signals.SUCCESS, result=result)
                     # measure_program = BellMeasurementProgram()
@@ -97,11 +99,11 @@ class RepeaterProtocol(NodeProtocol):
             rx2 = self.node.ports[self.port_names[1]].rx_input()
             if rx1 is not None and rx2 is not None:
                 if rx1.items[0] is not None and rx2.items[0] is not None:                                               # FIXME: FIGURE OUT WHY THIS IS NEEDED TO AVOID RX2 SENDING [None]
-                    q1 = rx1.items[0]
-                    q2 = rx2.items[0]
+                    q1, = rx1.items
+                    q2, = rx2.items
                     self.node.qmemory.put([q1,q2], positions=[0,1])
                     result = {
-                        "slots": [0, 1]
+                        'slots': [0, 1]
                     }
                     self.send_signal(Signals.SUCCESS, result=result)
                 # measure_program = BellMeasurementProgram()
@@ -112,7 +114,7 @@ class RepeaterProtocol(NodeProtocol):
                 # measurement = [m0, m1]
                 # result = {
                 #     "meas": measurement,
-                #     "slots": [0,1]                                                                                      # "no_mem" always accessed slots [0,1] for use with qprocessor (non-physical to avoid qmemory error)
+                #     "slots": [0,1]                                                                                    # "no_mem" always accessed slots [0,1] for use with qprocessor (non-physical to avoid qmemory error)
                 # }
                 # self.send_signal(Signals.SUCCESS, result=result)  # FIXME: Could this cause issues if keeping track of elapsed time is important?
 
@@ -129,7 +131,7 @@ class BellMeasurementProgram(QuantumProgram):
         q1, q2 = self.get_qubit_indices(2)
         self.apply(instr.INSTR_MEASURE_BELL, [q1, q2],
                    inplace=True,
-                   output_key="BellStateIndex")                                                                         # "inplace"-> True: program won't discard qubits, allow SimProtocol to inspect and then discard
+                   output_key='BellStateIndex')                                                                         # "inplace"-> True: program won't discard qubits, allow SimProtocol to inspect and then discard
         yield self.run()
 
 
@@ -155,7 +157,9 @@ class RouteQubits(NodeProtocol):
         self.port = self.node.ports[port_name]
 
     def _get_unused_slot(self):                                                                                    # check for first available memory slot
-        for position in self.node.qmemory.get_matching_positions('origin', value='{}'.format(self.name.strip('route_'))):
+        for position in self.node.qmemory.get_matching_positions(
+                'origin', value='{}'.format(self.name.strip('route_'))):
+
             if not self.node.qmemory.get_position_used(position):
                 return position
         return None
@@ -164,8 +168,7 @@ class RouteQubits(NodeProtocol):
         while True:
             yield self.await_port_input(self.port)                                                                      # wait for incoming qubit
             message = self.port.rx_input()
-            qubit = message.items[0]
-            # print(f"[At {ns.sim_time()}]: Arriving from {self.port.name}: {qubit} \n qstate: \n{qubit.qstate.dm}\n")
+            qubit, = message.items
             mem_pos = self._get_unused_slot()
             if mem_pos is not None:
                 self.node.qmemory.put(qubit, positions=mem_pos)
@@ -188,7 +191,7 @@ class SourceProtocol(NodeProtocol):
 
 
     def run(self):
-        self.node.subcomponents["Clock_{}".format(self.node.name)].start()
+        self.node.subcomponents['Clock_{}'.format(self.node.name)].start()
         while True:
             yield self.await_port_output(self.node.subcomponents['QSource_{}'.format(self.node.name)].ports['qout0'])
             self.send_signal(Signals.SUCCESS, result=ns.sim_time())
@@ -222,27 +225,28 @@ class SimulationProtocol(LocalProtocol):
     """
 
     def __init__(self, node_A, node_B, node_R, use_memory):
-        super().__init__(nodes={"A": node_A, "B": node_B, "R": node_R}, name="Simulation Protocol")
+        super().__init__(nodes={'A': node_A, 'B': node_B, 'R': node_R}, name='Simulation Protocol')
         self._add_subprotocols(node_A,node_B,node_R, use_memory)
 
     def _add_subprotocols(self, node_A, node_B, node_R, use_memory):
-        self.add_subprotocol(SourceProtocol(node_A, name="source_A"))
-        self.add_subprotocol(SourceProtocol(node_B, name="source_B"))
-        self.add_subprotocol(RepeaterProtocol(node_R, use_memory, name="repeater_R"))
+        self.add_subprotocol(SourceProtocol(node_A, name='source_A'))
+        self.add_subprotocol(SourceProtocol(node_B, name='source_B'))
+        self.add_subprotocol(RepeaterProtocol(node_R, use_memory, name='repeater_R'))
 
     def run(self):
         self.start_subprotocols()
         while True:
-            yield self.await_signal(self.subprotocols["repeater_R"], Signals.SUCCESS)
-            repeater_result = self.subprotocols["repeater_R"].get_signal_result(label=Signals.SUCCESS, receiver=self)
-            slots = repeater_result["slots"]
-            q1,q2 = self.subprotocols["repeater_R"].node.qmemory.pop(slots)                                             # grab/remove qubits after measurement FIXME: Figure out actual interpretation of results
+            yield self.await_signal(self.subprotocols['repeater_R'], Signals.SUCCESS)
+            repeater_result = self.subprotocols['repeater_R'].get_signal_result(label=Signals.SUCCESS, receiver=self)
+            slots = repeater_result['slots']
+            q1,q2 = self.subprotocols['repeater_R'].node.qmemory.pop(slots)                                             # grab/remove qubits after measurement FIXME: Figure out actual interpretation of results
             fid_q1 = qapi.fidelity(q1, ks.y0, squared=True)
             fid_q2 = qapi.fidelity(q2, ks.y0, squared=True)
             result = {
-                "sim_time": ns.sim_time(),
-                "fid_q1": fid_q1,
-                "fid_q2": fid_q2
+                'fid_q1': fid_q1,
+                'pos_A': slots[0],
+                'fid_q2': fid_q2,
+                'pos_B': slots[1]
             }
             self.send_signal(Signals.SUCCESS, result=result)
 
@@ -251,30 +255,30 @@ class SimulationProtocol(LocalProtocol):
 def setup_network(channel_model, channel_length, memory_model, memory_depth, clock_model, attempts,
                   physical_instructions=None):
 
-    network = Network("Entanglement_swap")
-    node_a, node_b, node_r = network.add_nodes(["node_A", "node_B", "node_R"])
+    network = Network('Entanglement_swap')
+    node_a, node_b, node_r = network.add_nodes(['node_A', 'node_B', 'node_R'])
 
     state_sampler = StateSampler(qs_reprs=[ks.y0], probabilities=[1.0], formalism=QFormalism.DM)
 
     # Setup end node A:                                                                                                 # for future versions can add qmemory/qproc here too!
-    source_a = QSource(name="QSource_node_A",
+    source_a = QSource(name='QSource_node_A',
                        state_sampler=state_sampler,
                        num_ports=1,
                        status=SourceStatus.EXTERNAL,
-                       properties={"is_number_state": True},                                                            # set source to generate 'number_state' qubits. aka photons
-                       output_meta={"qm_replace": False})                                                               # failsafe, preventing qubits in memory from being replaced by newer ones
+                       properties={'is_number_state': True},                                                            # set source to generate 'number_state' qubits. aka photons
+                       output_meta={'qm_replace': False})                                                               # failsafe, preventing qubits in memory from being replaced by newer ones
     clock_a = Clock(name='Clock_node_A', models=clock_model, max_ticks=attempts)
     clock_a.ports['cout'].connect(source_a.ports['trigger'])
 
     node_a.add_subcomponent(source_a)
     node_a.add_subcomponent(clock_a)
     # Setup end node B:                                                                                                 # for future versions can add qmemory/qproc here too!
-    source_b = QSource(name="QSource_node_B",
+    source_b = QSource(name='QSource_node_B',
                        state_sampler=state_sampler,
                        num_ports=1,
                        status=SourceStatus.EXTERNAL,
-                       properties={"is_number_state": True},                                                            # set source to generate 'number_state' qubits. aka photons
-                       output_meta={"qm_replace": False})                                                               # failsafe, preventing qubits in memory from being replaced by newer ones
+                       properties={'is_number_state': True},                                                            # set source to generate 'number_state' qubits. aka photons
+                       output_meta={'qm_replace': False})                                                               # failsafe, preventing qubits in memory from being replaced by newer ones
     clock_b = Clock(name='Clock_node_B', models=clock_model, max_ticks=attempts)
     clock_b.ports['cout'].connect(source_b.ports['trigger'])
     node_b.add_subcomponent(source_b)
@@ -283,48 +287,49 @@ def setup_network(channel_model, channel_length, memory_model, memory_depth, clo
     # Setup midpoint repeater node R:
     if memory_depth == 0:                                                                                               # special case, initialize nonphysical processor to simply handle measurement on simultaneous input
         memory_depth = 1
-        qprocessor_r = QuantumProcessor(name="QProcessor_R",
+        qprocessor_r = QuantumProcessor(name='QProcessor_R',
                                   num_positions=memory_depth*2,
                                   fallback_to_nonphysical=True,
                                   phys_instructions=None,
                                   memory_noise_models=None)
     else:
-        qprocessor_r = QuantumProcessor(name="QProcessor_R",
+        qprocessor_r = QuantumProcessor(name='QProcessor_R',
                                   num_positions=memory_depth*2,
                                   fallback_to_nonphysical=True,
                                   phys_instructions=physical_instructions,
                                   memory_noise_models=memory_model)
+
     for position in qprocessor_r.mem_positions[0: memory_depth]:
-        position.add_property('origin', value='node_A')
+        position.add_property('origin', value=node_a.name)                                                                 # first half of qmemory is allocated for qubits from node_A
     for position in qprocessor_r.mem_positions[memory_depth:]:
-        position.add_property('origin', value='node_B')
+        position.add_property('origin', value=node_b.name)                                                                 # second half of qmemory is allocated for qubits from node_B
     node_r.add_subcomponent(qprocessor_r)
 
     # Setup quantum channels:
-    qchannel_ar = QuantumChannel(name="QChannel_A->R",
+    qchannel_ar = QuantumChannel(name='QChannel_A->R',
                                  length=channel_length,
                                  models=channel_model)
-    port_name_a, port_name_ra = network.add_connection(node_a, node_r, channel_to=qchannel_ar, label="quantum",
-                                                       port_name_node1="conn|A->R|", port_name_node2="conn|R<-A|")
-    qchannel_br = QuantumChannel(name="QChannel_B->R",
+    port_name_a, port_name_ra = network.add_connection(node_a, node_r, channel_to=qchannel_ar, label='quantum',
+                                                       port_name_node1='conn|A->R|', port_name_node2='conn|R<-A|')
+    qchannel_br = QuantumChannel(name='QChannel_B->R',
                                  length=channel_length,
                                  models=channel_model)
-    port_name_b, port_name_rb = network.add_connection(node_b, node_r, channel_to=qchannel_br, label="quantum",
-                                                       port_name_node1="conn|B->R|", port_name_node2="conn|R<-B|")
+    port_name_b, port_name_rb = network.add_connection(node_b, node_r, channel_to=qchannel_br, label='quantum',
+                                                       port_name_node1='conn|B->R|', port_name_node2='conn|R<-B|')
     # Setup Alice ports:
-    node_a.subcomponents["QSource_node_A"].ports["qout0"].forward_output(node_a.ports[port_name_a])
+    node_a.subcomponents['QSource_node_A'].ports['qout0'].forward_output(node_a.ports[port_name_a])
 
     # Setup Bob ports:
-    node_b.subcomponents["QSource_node_B"].ports["qout0"].forward_output(node_b.ports[port_name_b])
+    node_b.subcomponents['QSource_node_B'].ports['qout0'].forward_output(node_b.ports[port_name_b])
 
     # Realize setup of Repeater ports unnecessary, routing on IO ports handled in RepeaterProtocol
     return network
 
 
 def sim_setup(network, memory_depth):
-    simulation = SimulationProtocol(network.get_node("node_A"),
-                                    network.get_node("node_B"),
-                                    network.get_node("node_R"),
+    simulation = SimulationProtocol(network.get_node('node_A'),
+                                    network.get_node('node_B'),
+                                    network.get_node('node_R'),
                                     memory_depth)
 
     def record_run(evexpr):
@@ -342,13 +347,14 @@ def sim_setup(network, memory_depth):
 def run_simulation(attempts, memory_depths):
     simulation_data = pandas.DataFrame()
     for memory_depth in memory_depths:
+        ns.sim_reset()                                                                                                  # reset simulation stats/time each run
         ns.set_qstate_formalism(QFormalism.DM)                                                                          # set formalism to ensure noise/error is calculated effectively
         frequency = 1e9                                                                                                 # frequency in [Hz]
         period = (1/frequency)*1e9                                                                                      # period in [ns]
         clock_model = {'timing_model': GaussianDelayModel(delay_mean=period, delay_std=0.00)}                                            # model for emission_delay, std determines uncertainty/error
         channel_length = 500                                                                                            # single channel length in [km]
-        channel_model = {"quantum_loss_model": FreeSpaceErrorModel(length=channel_length, static_loss_prob=0.3),
-                         "delay_model": FibreDelayModel(c=3e5)}                                                         # FIXME: Implementation of free space model with arbitrary loss params
+        channel_model = {'quantum_loss_model': FreeSpaceErrorModel(length=channel_length, static_loss_prob=0.99),
+                         'delay_model': FibreDelayModel(c=3e5)}                                                         # FIXME: Implementation of free space model with arbitrary loss params
 
         # memory_model = T1T2NoiseModel(T1=1e4, T2=1e3)
         # memory_model = T1T2NoiseModel(T1=10.0, T2=8.0)                                                                  # FIXME: using arbitrary noise model to apply noise to stored qubits
@@ -369,22 +375,29 @@ def run_simulation(attempts, memory_depths):
         entangle_sim, dc = sim_setup(network, use_memory)
         entangle_sim.start()
         stats = ns.sim_run()                                                                                            # run until out of attempts on source clocks
-        if dc.dataframe.empty:                                                                                          # FIXME: Ignore this case for now
-            print("WARNING IN EMPTY CASE")
-            dc.dataframe["mem_depth"] = memory_depth
-        else:
-            dc.dataframe["mem_depth"] = memory_depth
-            dc.dataframe["num_meas"] = dc.dataframe["sim_time"].size                                                    # add data on number of measurements for each run
-        simulation_data = simulation_data.append(dc.dataframe)
-        ns.sim_reset()                                                                                                  # FIXME: Critical component, should it be a full reset though?
+
+        if dc.dataframe.empty:                                                                                          # build df for case with no successes
+            data = [{'Memory Depth': memory_depth, 'num_meas': 0, 'fid_q1': None, 'fid_q2': None}]
+            df = pandas.DataFrame(data)
+        else:                                                                                                           # build df for each run from datacollector
+            fid_q1 = dc.dataframe['fid_q1'].mean()
+            fid_q2 = dc.dataframe['fid_q2'].mean()
+            num_meas = len(dc.dataframe)
+            mem_use_A = dc.dataframe['pos_A'].value_counts()
+            mem_use_B = dc.dataframe['pos_B'].value_counts()
+            mem_use = mem_use_A.append(mem_use_B)                                                                       # FIXME: for future use, tracking which mem slots are used
+            data = [{'Memory Depth': memory_depth, 'num_meas': num_meas, 'fid_q1': fid_q1, 'fid_q2': fid_q2}]
+            df = pandas.DataFrame(data)
+        simulation_data = simulation_data.append(df)                                                                    # append df for each run to simulation data
     return simulation_data
 
 
 def repeat_simulation(iterations, duration, memory_depths):
     total_data = pandas.DataFrame()
-    for i in range(iterations):
+    for iteration in range(iterations):
         simulation_data = run_simulation(duration, memory_depths)
-        print(f"ON ITERATION: {i}")
+        simulation_data.insert(0, 'iteration', iteration)
+        print(f"ON ITERATION: {iteration}")
         print(simulation_data)
         total_data = total_data.append(simulation_data)
     return total_data
@@ -394,33 +407,35 @@ def create_plot():
     from matplotlib import pyplot as plt
     memory_depths = [0,1,2,3,4,5]
     iterations = 10
-    attempts = 100
+    attempts = 1000
     total_data = repeat_simulation(iterations, attempts, memory_depths)
-    q1_data = total_data.groupby("mem_depth")['fid_q1'].agg(fid_q1='mean', sem='sem').reset_index()
-    q2_data = total_data.groupby("mem_depth")['fid_q2'].agg(fid_q2='mean', sem='sem').reset_index()
-
-    measurement_data = total_data.groupby("mem_depth")['num_meas'].agg(num_meas='mean', sem='sem').reset_index()
+    total_data.to_csv('/Users/nickmccartney/Desktop/total_data.csv')
+    avg_data = total_data.groupby('Memory Depth')[['num_meas', 'fid_q1', 'fid_q2']].agg(
+        {'num_meas': ['mean', 'std'], 'fid_q1': ['mean', 'std'], 'fid_q2': ['mean', 'std']}).reset_index()
+    avg_data.to_csv('/Users/nickmccartney/Desktop/avg_data.csv')
 
     plt.figure()
-    plt.subplot(1,2,1)
-    plt.errorbar('mem_depth', 'fid_q1', yerr='sem', capsize=4, ecolor='k', fmt='bo-', markersize=4, data=q1_data, label='Fidelity q1')
-    plt.errorbar('mem_depth', 'fid_q2', yerr='sem', capsize=4, ecolor='k', fmt='ro-', markersize=4, data=q2_data, label='Fidelity q2')
-    plt.xlabel("Memory Depth (per connection)")
-    plt.ylabel("Fidelity (compared to sent state)")
-    plt.grid(True)
-    plt.title("Fidelity vs Memory Depth")
-    plt.legend()
-    plt.plot()
 
-    plt.subplot(1,2,2)
-    plt.bar('mem_depth', 'num_meas', yerr='sem', width=0.5, capsize=10, color='g',ecolor='k', data=measurement_data)
+    plt.subplot(1,2,1)
+    plt.bar(avg_data['Memory Depth'], avg_data['num_meas']['mean'], yerr=avg_data['num_meas']['std'],
+            width=0.5, capsize=10, color='g',ecolor='k')
     plt.xlabel("Memory Depth (per connection)")
     plt.ylabel("# of (possible) Measurement Events")
     plt.title("Number Measurements vs Memory Depth")
+
+    plt.subplot(1,2,2)
+    plt.errorbar(avg_data['Memory Depth'], avg_data['fid_q1']['mean'], yerr=avg_data['fid_q1']['std'],
+                 capsize=4, ecolor='k', fmt='bo-', markersize=4, label='Fidelity from node A')
+    plt.errorbar(avg_data['Memory Depth'], avg_data['fid_q2']['mean'], yerr=avg_data['fid_q2']['std'],
+                 capsize=4, ecolor='k', fmt='rs--', markersize=4, label='Fidelity from node B')
+    plt.xlabel("Memory Depth (per connection)")
+    plt.ylabel("Avg. Fidelity (compared to sent state)")
+    plt.grid(True)
+    plt.title("Avg. Fidelity vs Memory Depth per connection")
+    plt.legend()
+
     plt.suptitle("Analysis: {} Iterations of {} attempts".format(iterations, attempts))
     plt.show()
-
-
 
 create_plot()
 ns.sim_reset()
