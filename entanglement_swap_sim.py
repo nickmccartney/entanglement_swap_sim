@@ -4,19 +4,58 @@ import netsquid as ns
 from netsquid.components import SourceStatus, Clock, GaussianDelayModel
 from netsquid.components import QuantumChannel
 from netsquid.components import QuantumProcessor, T1T2NoiseModel, PhysicalInstruction
-from netsquid.components.models import FibreDelayModel
+from netsquid.components.models import FibreDelayModel, FibreLossModel
 from netsquid.nodes import Network
 from netsquid.protocols import Signals
 from netsquid.qubits import StateSampler, QFormalism, ketstates as ks
 from netsquid.util.datacollector import DataCollector
 
 from qsource import QSource                                                                                             # use localy modified version of QSource
-from FreeSpaceErrorModel import FreeSpaceErrorModel
+# from FreeSpaceErrorModel import FreeSpaceErrorModel
 from SimulationProtocol import SimulationProtocol
 
 
-def setup_network(channel_A_length, channel_A_model, channel_B_length, channel_B_model,
-                  memory_model, memory_depth, clock_model, attempts, physical_instructions=None):
+def setup_network(source_frequency, source_attempts,
+                  channel_A_length, channel_A_loss, channel_A_speed,
+                  channel_B_length, channel_B_loss, channel_B_speed,
+                  memory_T1, memory_T2, memory_depth,
+                  physical_instructions=None):
+
+
+    # find each channel's propagation time [ns]:
+    propagation_time_A = (channel_A_length / channel_A_speed) * 1e9
+    propagation_time_B = (channel_B_length / channel_B_speed) * 1e9
+
+    print(propagation_time_A, propagation_time_B)
+
+    if propagation_time_A < propagation_time_B:
+        clock_A_delay = propagation_time_B - propagation_time_A
+        print(f"in 1st: {clock_A_delay}")
+        clock_B_delay = 0
+    elif propagation_time_A > propagation_time_B:
+        clock_A_delay = 0
+        clock_B_delay = propagation_time_A - propagation_time_B
+        print(f"in 2nd: {clock_B_delay}")
+    else:
+        clock_A_delay = 0
+        clock_B_delay = 0
+
+    source_period = 1e9 / source_frequency                                                                              # source period [ns]
+    clock_model = {'timing_model': GaussianDelayModel(delay_mean=source_period, delay_std=0.00)}
+
+    channel_A_model = {'quantum_loss_model':
+                           FibreLossModel(p_loss_init=0.0, p_loss_length=channel_A_loss),
+                       'delay_model':
+                           FibreDelayModel(c=channel_A_speed)}                                                          # define channel_A_model according to passed sim_params
+
+    channel_B_model = {'quantum_loss_model':
+                           FibreLossModel(p_loss_init=0.0, p_loss_length=channel_B_loss),
+                       'delay_model':
+                           FibreDelayModel(c=channel_B_speed)}                                                          # define channel_B_model according to passed sim_params
+
+    memory_model = T1T2NoiseModel(memory_T1, memory_T2)
+
+
 
     network = Network('Entanglement_swap')
     node_a, node_b, node_r = network.add_nodes(['node_A', 'node_B', 'node_R'])
@@ -28,21 +67,22 @@ def setup_network(channel_A_length, channel_A_model, channel_B_length, channel_B
                        state_sampler=state_sampler,
                        num_ports=1,
                        status=SourceStatus.EXTERNAL,
-                       properties={'is_number_state': True},                                                            # set source to generate 'number_state' qubits. aka photons
+                       properties={'is_number_state': False},                                                           # FIXME: WHY IS THIS USED AGAIN?, seems that we can decay qubit state just fine in memory
                        output_meta={'qm_replace': False})                                                               # failsafe, preventing qubits in memory from being replaced by newer ones
-    clock_a = Clock(name='Clock_node_A', models=clock_model, max_ticks=attempts)                                        # "max_ticks" will timeout the program after desired number of connection attempts
+    clock_a = Clock(name='Clock_node_A', models=clock_model, start_delay=clock_A_delay, max_ticks=source_attempts)                                        # "max_ticks" will timeout the program after desired number of connection attempts
     clock_a.ports['cout'].connect(source_a.ports['trigger'])                                                            # external clock triggers source
 
     node_a.add_subcomponent(source_a)
     node_a.add_subcomponent(clock_a)
+
     # Setup end node B:                                                                                                 # for future versions can add qmemory/qproc here too!
     source_b = QSource(name='QSource_node_B',
                        state_sampler=state_sampler,
                        num_ports=1,
                        status=SourceStatus.EXTERNAL,
-                       properties={'is_number_state': True},                                                            # set source to generate 'number_state' qubits. aka photons
+                       properties={'is_number_state': False},                                                           # set source to generate 'number_state' qubits. aka photons
                        output_meta={'qm_replace': False})                                                               # failsafe, preventing qubits in memory from being replaced by newer ones
-    clock_b = Clock(name='Clock_node_B', models=clock_model, max_ticks=attempts)                                        # "max_ticks" will timeout the program after desired number of connection attempts
+    clock_b = Clock(name='Clock_node_B', models=clock_model, start_delay=clock_B_delay, max_ticks=source_attempts)                                        # "max_ticks" will timeout the program after desired number of connection attempts
     clock_b.ports['cout'].connect(source_b.ports['trigger'])                                                            # external clock triggers source
     node_b.add_subcomponent(source_b)
     node_b.add_subcomponent(clock_b)
@@ -107,35 +147,17 @@ def sim_setup(network, memory_depth):
     return simulation, dc
 
 
-def run_simulation(sim_params, attempts):
+def run_simulation(sim_params, attempts, memory_depths):
     simulation_data = pandas.DataFrame()
-    for memory_depth in sim_params['memory_depths']:
+    for memory_depth in memory_depths:
         ns.sim_reset()                                                                                                  # reset simulation stats/time each run
-        ns.set_qstate_formalism(QFormalism.DM)                                                                          # set formalism to ensure noise/error is calculated accurately                                                                                              # frequency in [Hz]
-        period = 1e9/sim_params['source_frequency']                                                                     # period in [ns]
-        clock_model = {'timing_model': GaussianDelayModel(delay_mean=period, delay_std=0.00)}                           # model for emission_delay, std determines uncertainty/error                                                                                        # single channel length in [km]
-        channel_A_model = {'quantum_loss_model':
-                               FreeSpaceErrorModel(length=sim_params['channel_A_length'],
-                                                   static_loss_prob=sim_params['channel_A_loss']),
-                           'delay_model':
-                               FibreDelayModel(c=3e5)}                                                                  # define channel_A_model according to sim_params
+        ns.set_qstate_formalism(QFormalism.DM)                                                                          # set formalism to ensure noise/error is calculated accurately
 
-        channel_B_model = {'quantum_loss_model':
-                               FreeSpaceErrorModel(length=sim_params['channel_B_length'],
-                                                   static_loss_prob=sim_params['channel_B_loss']),
-                           'delay_model':
-                               FibreDelayModel(c=3e5)}                                                                  # define channel_B_model according to sim_params
+        # phys_instructions = [PhysicalInstruction(instr.INSTR_MEASURE_BELL, duration=5.0, parallel=True)]              # FIXME: possibly for later use
 
-        # phys_instructions = [PhysicalInstruction(instr.INSTR_MEASURE_BELL, duration=5.0, parallel=True)]
-
-        network = setup_network(channel_A_length=sim_params['channel_A_length'],
-                                channel_A_model=channel_A_model,
-                                channel_B_length=sim_params['channel_B_length'],
-                                channel_B_model=channel_B_model,
-                                memory_model=T1T2NoiseModel(sim_params['T1'], sim_params['T2']),
+        network = setup_network(source_attempts=attempts,
                                 memory_depth=memory_depth,
-                                clock_model=clock_model,
-                                attempts=attempts)                                                                      # describe network parameters as given in sim_params
+                                **sim_params)                                                                           # describe network parameters as given in sim_params
 
         if memory_depth == 0:                                                                                           # variable to determine which function to run in RepeaterProtocol
             use_memory = False
@@ -171,10 +193,10 @@ def run_simulation(sim_params, attempts):
     return simulation_data
 
 
-def repeat_simulation(sim_params, attempts, iterations):                                                                # run simulation for given amount of iterations
+def repeat_simulation(sim_params, attempts, iterations, memory_depths):                                                 # run simulation for given amount of iterations
     total_data = pandas.DataFrame()
     for iteration in range(iterations):
-        simulation_data = run_simulation(sim_params, attempts)
+        simulation_data = run_simulation(sim_params, attempts, memory_depths)
         simulation_data.insert(0, 'iteration', iteration)
         print(f"ON ITERATION: {iteration}")
         print(simulation_data)
@@ -182,16 +204,16 @@ def repeat_simulation(sim_params, attempts, iterations):                        
     return total_data
 
 
-def create_plot(sim_params, attempts, iterations):
+def create_plot(sim_params, attempts, iterations, memory_depths):
     from matplotlib import pyplot as plt
-    total_data = repeat_simulation(sim_params, attempts, iterations)                                                    # gather simulation data
-    total_data.to_csv('/Users/nickmccartney/Desktop/total_data.csv')                                                    # FIXME: Make system agnostic
+    total_data = repeat_simulation(sim_params, attempts, iterations, memory_depths)                                     # gather simulation data
+    # total_data.to_csv('/Users/nickmccartney/Desktop/total_data.csv')                                                  # FIXME: Make system agnostic
     avg_data = total_data.groupby('Memory Depth')[['num_meas', 'fid_q1', 'fid_q2', 'fid_joint']].agg(
         {'num_meas': ['mean', 'std'],
          'fid_q1': ['mean', 'std'],
          'fid_q2': ['mean', 'std'],
          'fid_joint': ['mean', 'std']}).reset_index()                                                                   # compute average and std of data over all iterations
-    avg_data.to_csv('/Users/nickmccartney/Desktop/avg_data.csv')                                                        # FIXME: Make system agnostic
+    # avg_data.to_csv('/Users/nickmccartney/Desktop/avg_data.csv')                                                      # FIXME: Make system agnostic
 
     fig = plt.figure()
     fig.set_size_inches(16,6)
@@ -203,7 +225,7 @@ def create_plot(sim_params, attempts, iterations):
     plt.xlabel("Memory Depth (per connection)")
     plt.ylabel("# of (possible) Measurements")
     plt.ylim([0,attempts])
-    plt.xticks(sim_params['memory_depths'], sim_params['memory_depths'])
+    plt.xticks(memory_depths, memory_depths)
     plt.setp(ax.get_xticklabels()[1::2], visible=False)
     plt.title("Number Measurements vs Memory Depth")
 
@@ -218,7 +240,7 @@ def create_plot(sim_params, attempts, iterations):
     plt.xlabel("Memory Depth (per connection)")
     plt.ylabel("Avg. Fidelity (v.s. expected state)")
     plt.ylim([0,1.05])
-    plt.xticks(sim_params['memory_depths'], sim_params['memory_depths'])
+    plt.xticks(memory_depths, memory_depths)
     plt.setp(ax.get_xticklabels()[1::2], visible=False)
     plt.grid(True)
     plt.title("Avg. Fidelity vs Memory Depth per connection")
@@ -228,11 +250,11 @@ def create_plot(sim_params, attempts, iterations):
     ax = plt.subplot(2,1,2)
     table_data = [["Frequency (MHz)", "", sim_params['source_frequency']/1e6],
                   ["Channel A", "Length (km)", sim_params['channel_A_length']],
-                  ["", "Loss (%)", sim_params['channel_A_loss']*100],
+                  ["", "Loss (dB/km)", sim_params['channel_A_loss']],
                   ["Channel B", "Length (km)", sim_params['channel_B_length']],
-                  ["", "Loss (%)", sim_params['channel_B_loss']*100],
-                  ["Memory", "T1 (ns)", sim_params['T1']],
-                  ["", "T1 (ns)", sim_params['T2']]]
+                  ["", "Loss (dB/km)", sim_params['channel_B_loss']],
+                  ["Memory", "T1 (ns)", sim_params['memory_T1']],
+                  ["", "T1 (ns)", sim_params['memory_T2']]]
 
     table = plt.table(cellText=table_data,
                       cellLoc='left',
@@ -247,18 +269,20 @@ def create_plot(sim_params, attempts, iterations):
 
 
 sim_params = {
-    'source_frequency': 80e6,    # [hz]
-    'channel_A_length': 500,    # [km]
-    'channel_A_loss': 0.50,     # [prob]
-    'channel_B_length': 500,    # [km]
-    'channel_B_loss': 0.50,     # [prob]
-    'T1': 1000,                   # [ns]
-    'T2': 800,                    # [ns]
-    'memory_depths': [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,30,40,50]
+    'source_frequency': 100e6,      # [hz]
+    'channel_A_length': 30,         # [km]
+    'channel_A_loss': 0.2,          # [dB/km]
+    'channel_A_speed': 3e5,         # [km/s]
+    'channel_B_length': 50,         # [km]
+    'channel_B_loss': 0.2,          # [dB/km]
+    'channel_B_speed': 3e5,         # [km/s]
+    'memory_T1': 1.0e4,             # [ns]
+    'memory_T2': 0.5e4,             # [ns]
 }
 
-attempts = 100
-iterations = 1
+memory_depths = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,30,40,50]
+attempts = 10000
+iterations = 15
 
-create_plot(sim_params, attempts, iterations)
+create_plot(sim_params, attempts, iterations, memory_depths)
 ns.sim_reset()
