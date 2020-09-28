@@ -4,13 +4,14 @@ import netsquid as ns
 from netsquid.components import SourceStatus, Clock, GaussianDelayModel
 from netsquid.components import QuantumChannel
 from netsquid.components import QuantumProcessor, T1T2NoiseModel, PhysicalInstruction
-from netsquid.components.models import FibreDelayModel, FibreLossModel
+from netsquid.components.models import FibreDelayModel
 from netsquid.nodes import Network
 from netsquid.protocols import Signals
 from netsquid.qubits import StateSampler, QFormalism, ketstates as ks
 from netsquid.util.datacollector import DataCollector
 
 from qsource import QSource                                                                                             # use localy modified version of QSource
+from FibreLossModel import FibreLossModel
 # from FreeSpaceErrorModel import FreeSpaceErrorModel
 from SimulationProtocol import SimulationProtocol
 
@@ -26,16 +27,12 @@ def setup_network(source_frequency, source_attempts,
     propagation_time_A = (channel_A_length / channel_A_speed) * 1e9
     propagation_time_B = (channel_B_length / channel_B_speed) * 1e9
 
-    print(propagation_time_A, propagation_time_B)
-
     if propagation_time_A < propagation_time_B:
         clock_A_delay = propagation_time_B - propagation_time_A
-        print(f"in 1st: {clock_A_delay}")
         clock_B_delay = 0
     elif propagation_time_A > propagation_time_B:
         clock_A_delay = 0
         clock_B_delay = propagation_time_A - propagation_time_B
-        print(f"in 2nd: {clock_B_delay}")
     else:
         clock_A_delay = 0
         clock_B_delay = 0
@@ -43,13 +40,14 @@ def setup_network(source_frequency, source_attempts,
     source_period = 1e9 / source_frequency                                                                              # source period [ns]
     clock_model = {'timing_model': GaussianDelayModel(delay_mean=source_period, delay_std=0.00)}
 
+    coupling_loss = 5.0                                                                                                   # Typical coupling loss [dB]
     channel_A_model = {'quantum_loss_model':
-                           FibreLossModel(p_loss_init=0.0, p_loss_length=channel_A_loss),
+                           FibreLossModel(loss_init=coupling_loss, p_loss_length=channel_A_loss),                                            # FIXME: Hardcoded 'loss_init'
                        'delay_model':
                            FibreDelayModel(c=channel_A_speed)}                                                          # define channel_A_model according to passed sim_params
 
     channel_B_model = {'quantum_loss_model':
-                           FibreLossModel(p_loss_init=0.0, p_loss_length=channel_B_loss),
+                           FibreLossModel(loss_init=coupling_loss, p_loss_length=channel_B_loss),                                            # FIXME: Hardcoded 'loss_init'
                        'delay_model':
                            FibreDelayModel(c=channel_B_speed)}                                                          # define channel_B_model according to passed sim_params
 
@@ -270,7 +268,7 @@ def create_plot(sim_params, attempts, iterations, memory_depths):
 
 sim_params = {
     'source_frequency': 100e6,      # [hz]
-    'channel_A_length': 30,         # [km]
+    'channel_A_length': 7,         # [km]
     'channel_A_loss': 0.2,          # [dB/km]
     'channel_A_speed': 3e5,         # [km/s]
     'channel_B_length': 50,         # [km]
@@ -281,8 +279,8 @@ sim_params = {
 }
 
 memory_depths = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,30,40,50]
-attempts = 10000
-iterations = 15
+attempts = 1000
+iterations = 10
 
 create_plot(sim_params, attempts, iterations, memory_depths)
 ns.sim_reset()
