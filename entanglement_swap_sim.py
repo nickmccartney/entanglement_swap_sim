@@ -40,14 +40,14 @@ def setup_network(source_frequency, source_attempts,
     source_period = 1e9 / source_frequency                                                                              # source period [ns]
     clock_model = {'timing_model': GaussianDelayModel(delay_mean=source_period, delay_std=0.00)}
 
-    coupling_loss = 5.0                                                                                                   # Typical coupling loss [dB]
+    coupling_loss = 5.0                                                                                                 # Typical coupling loss [dB]
     channel_A_model = {'quantum_loss_model':
-                           FibreLossModel(loss_init=coupling_loss, p_loss_length=channel_A_loss),                                            # FIXME: Hardcoded 'loss_init'
+                           FibreLossModel(loss_init=coupling_loss, p_loss_length=channel_A_loss),
                        'delay_model':
                            FibreDelayModel(c=channel_A_speed)}                                                          # define channel_A_model according to passed sim_params
 
     channel_B_model = {'quantum_loss_model':
-                           FibreLossModel(loss_init=coupling_loss, p_loss_length=channel_B_loss),                                            # FIXME: Hardcoded 'loss_init'
+                           FibreLossModel(loss_init=coupling_loss, p_loss_length=channel_B_loss),
                        'delay_model':
                            FibreDelayModel(c=channel_B_speed)}                                                          # define channel_B_model according to passed sim_params
 
@@ -279,8 +279,8 @@ sim_params = {
 }
 
 memory_depths = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,30,40,50]
-attempts = 1000
-iterations = 10
+attempts = 10000
+iterations = 2
 
 create_plot(sim_params, attempts, iterations, memory_depths)
 ns.sim_reset()

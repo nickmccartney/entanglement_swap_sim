@@ -1,0 +1,6 @@
+# Ignore pyCharm generated files
+__pycache__/
+.idea/
+
+# Ignore temporary tests
+temp.py

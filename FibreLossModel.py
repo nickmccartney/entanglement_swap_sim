@@ -89,7 +89,6 @@ class FibreLossModel(QuantumErrorModel):
             prob_success_init = np.power(10, - self.loss_init / 10)
             prob_success_len = np.power(10, - kwargs['length'] * self.p_loss_length / 10)
             prob_loss = 1 - (prob_success_init * prob_success_len)         # FIXME: Modifed to use dB on 'loss_init'
-            print(f"Prob loss = {prob_loss}")
             self.lose_qubit(qubits, idx, prob_loss, rng=self.properties['rng'])
 
     def prob_item_lost(self, item, delta_time=0, **kwargs):
