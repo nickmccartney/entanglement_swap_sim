@@ -56,6 +56,7 @@ class RepeaterProtocol(NodeProtocol):
         self.add_subprotocol(ManageMemory(node, port_name_B, 'manage_slots_node_B'))
 
     def run(self):
+        self.node.subcomponents["Clock_{}".format(self.node.name)].start()
         if self.use_memory is False:
             yield from self._run_no_mem()
         else:
@@ -147,19 +148,18 @@ class MemoryAccess(NodeProtocol):   # FIXME: should start once qubits are expect
 
     def __init__(self, node, slots, name):
         super().__init__(node, name=name)
-        self.clock = Clock('internal', frequency=100e6, start_delay=166756.66666666666, max_ticks=10000)                               # FIXME: ALL HARDCODED
         self.slots = slots
         self.slots_status = [True] * len(self.slots)
-        self.reset_time = 300
+        # FIXME: # cycles to reset is hardcoded : realize "300" being the period leads to reset taking 10ns * 300 cycles = 3000 ns
+        self.reset_time = 500
         self.slots_reset_timer = [self.reset_time] * len(self.slots)
 
         self.removed_qubit = "REMOVED"
         self.add_signal(self.removed_qubit)
 
     def run(self):
-        self.clock.start()
         while True:
-            yield self.await_port_output(self.clock.ports['cout'])
+            yield self.await_port_output(self.node.subcomponents["Clock_{}".format(self.node.name)].ports['cout'])
 
             for idx, count in enumerate(self.slots_reset_timer):
                 if self.slots_status[idx] is False:
@@ -170,8 +170,8 @@ class MemoryAccess(NodeProtocol):   # FIXME: should start once qubits are expect
                         self.node.qmemory.mem_positions[self.slots[idx]].reset()
                         self.node.qmemory.set_position_used(False, idx)
 
-            # dont use "status == true" , instead only see if countdown is reset
-            if self.clock.num_ticks % 50 == 0:
+            # FIXME: cycles are hardcoded : realize with "50" cycles being the period, this means we reset every 10ns * 50 = 500 ns due to the clock frequency
+            if self.node.subcomponents["Clock_{}".format(self.node.name)].num_ticks % 50 == 0:
                 for idx, status in enumerate(self.slots_status):
                     if status is True:
                         self.slots_status[idx] = False

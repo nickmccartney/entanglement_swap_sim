@@ -30,12 +30,15 @@ def setup_network(source_frequency, source_attempts,
     if propagation_time_A < propagation_time_B:
         clock_A_delay = propagation_time_B - propagation_time_A
         clock_B_delay = 0
+        clock_R_delay = propagation_time_B
     elif propagation_time_A > propagation_time_B:
         clock_A_delay = 0
         clock_B_delay = propagation_time_A - propagation_time_B
+        clock_R_delay = propagation_time_A
     else:
         clock_A_delay = 0
         clock_B_delay = 0
+        clock_R_delay = propagation_time_A                                                                              # arbitrary choice since matched time
 
     source_period = 1e9 / source_frequency                                                                              # source period [ns]
     clock_model = {'timing_model': GaussianDelayModel(delay_mean=source_period, delay_std=0.00)}
@@ -69,7 +72,6 @@ def setup_network(source_frequency, source_attempts,
                        output_meta={'qm_replace': False})                                                               # failsafe, preventing qubits in memory from being replaced by newer ones
     clock_a = Clock(name='Clock_node_A', models=clock_model, start_delay=clock_A_delay, max_ticks=source_attempts)                                        # "max_ticks" will timeout the program after desired number of connection attempts
     clock_a.ports['cout'].connect(source_a.ports['trigger'])                                                            # external clock triggers source
-
     node_a.add_subcomponent(source_a)
     node_a.add_subcomponent(clock_a)
 
@@ -105,6 +107,9 @@ def setup_network(source_frequency, source_attempts,
     for position in qprocessor_r.mem_positions[memory_depth:]:
         position.add_property('origin', value=node_b.name)                                                              # second half of qmemory is allocated for qubits from node_B
     node_r.add_subcomponent(qprocessor_r)
+
+    clock_r = Clock(name='Clock_node_R', models=clock_model, start_delay=clock_R_delay, max_ticks=source_attempts)
+    node_r.add_subcomponent(clock_r)
 
     # Setup quantum channels:
     qchannel_ar = QuantumChannel(name='QChannel_A->R',
@@ -280,7 +285,7 @@ sim_params = {
 
 memory_depths = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,30,40,50]
 attempts = 10000
-iterations = 2
+iterations = 5
 
 create_plot(sim_params, attempts, iterations, memory_depths)
 ns.sim_reset()
