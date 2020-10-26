@@ -35,14 +35,14 @@ class SimulationProtocol(LocalProtocol):
 
     """
 
-    def __init__(self, node_A, node_B, node_R, use_memory):
+    def __init__(self, node_A, node_B, node_R, mem_config):
         super().__init__(nodes={'A': node_A, 'B': node_B, 'R': node_R}, name='Simulation Protocol')
-        self._add_subprotocols(node_A,node_B,node_R, use_memory)
+        self._add_subprotocols(node_A,node_B,node_R, mem_config)
 
-    def _add_subprotocols(self, node_A, node_B, node_R, use_memory):
+    def _add_subprotocols(self, node_A, node_B, node_R, mem_config):
         self.add_subprotocol(SourceProtocol(node_A, name='source_A'))
         self.add_subprotocol(SourceProtocol(node_B, name='source_B'))
-        self.add_subprotocol(RepeaterProtocol(node_R, use_memory, name='repeater_R'))
+        self.add_subprotocol(RepeaterProtocol(node_R, mem_config, name='repeater_R'))
 
     def run(self):
         self.start_subprotocols()

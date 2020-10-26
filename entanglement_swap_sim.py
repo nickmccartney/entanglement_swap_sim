@@ -16,11 +16,22 @@ from FibreLossModel import FibreLossModel
 from SimulationProtocol import SimulationProtocol
 
 
-def setup_network(source_frequency, source_attempts,
-                  channel_A_length, channel_A_loss, channel_A_speed,
-                  channel_B_length, channel_B_loss, channel_B_speed,
-                  memory_T1, memory_T2, memory_depth,
-                  physical_instructions=None):
+def setup_network(source_attempts,
+                  memory_depth,
+                  **kwargs):
+
+    # retrieve setup parameters from sim_params, substituting defaults when required
+    source_frequency = kwargs.get('source_frequency', 100e6)
+    channel_A_length = kwargs.get('channel_A_length', 1)
+    channel_A_loss = kwargs.get('channel_A_loss', 0)
+    channel_A_speed = kwargs.get('channel_A_speed', 3e5)
+    channel_B_length = kwargs.get('channel_B_length', 1)
+    channel_B_loss = kwargs.get('channel_B_loss', 0)
+    channel_B_speed = kwargs.get('channel_B_speed', 3e5)
+    memory_T1 = kwargs.get('memory_T1', 1.0e8)
+    memory_T2 = kwargs.get('memory_T2', 1.0e4)
+    physical_instructions = kwargs.get('physical_instructions', None)
+
 
 
     # find each channel's propagation time [ns]:
@@ -132,11 +143,11 @@ def setup_network(source_frequency, source_attempts,
     return network
 
 
-def sim_setup(network, memory_depth):
+def sim_setup(network, memory_config):
     simulation = SimulationProtocol(network.get_node('node_A'),
                                     network.get_node('node_B'),
                                     network.get_node('node_R'),
-                                    memory_depth)                                                                       # initialize protocol to handle simulation events
+                                    memory_config)                                                                       # initialize protocol to handle simulation events
 
     def record_run(evexpr):
         # Record run
@@ -155,7 +166,6 @@ def run_simulation(sim_params, attempts, memory_depths):
     for memory_depth in memory_depths:
         ns.sim_reset()                                                                                                  # reset simulation stats/time each run
         ns.set_qstate_formalism(QFormalism.DM)                                                                          # set formalism to ensure noise/error is calculated accurately
-
         # phys_instructions = [PhysicalInstruction(instr.INSTR_MEASURE_BELL, duration=5.0, parallel=True)]              # FIXME: possibly for later use
 
         network = setup_network(source_attempts=attempts,
@@ -166,7 +176,12 @@ def run_simulation(sim_params, attempts, memory_depths):
             use_memory = False
         else:
             use_memory = True
-        entangle_sim, dc = sim_setup(network, use_memory)
+        mem_config = {
+            'use_memory': use_memory,
+            'reset_period_cycles': sim_params['memory_reset_period'],
+            'reset_duration_cycles': sim_params['memory_reset_duration']
+        }
+        entangle_sim, dc = sim_setup(network, mem_config)
         entangle_sim.start()
         stats = ns.sim_run()                                                                                            # run until out of attempts on source clocks
 
@@ -281,10 +296,12 @@ sim_params = {
     'channel_B_speed': 3e5,         # [km/s]
     'memory_T1': 1.0e4,             # [ns]
     'memory_T2': 0.5e4,             # [ns]
+    'memory_reset_period': 50,      # cycles of internal clock
+    'memory_reset_duration': 100    # cycles of internal clock
 }
 
 memory_depths = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,30,40,50]
-attempts = 10000
+attempts = 100
 iterations = 5
 
 create_plot(sim_params, attempts, iterations, memory_depths)

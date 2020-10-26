@@ -33,15 +33,17 @@ class RepeaterProtocol(NodeProtocol):
         Manages routing qubits incoming from node_B to available memory slot
 
     """
-    def __init__(self, node, use_memory=True, name=None):
+    def __init__(self, node, mem_config, name=None):
         super().__init__(node, name=name)
-        self.use_memory = use_memory
+        self.use_memory = mem_config.pop('use_memory')
+        self.reset_config = mem_config
         self.result = None
         self._bsm_results = [(0, 0), (0, 1), (1, 0), (1, 1)]                                                            # Bell state measurement results
         self.port_names = list(dict(self.node.ports).keys())                                                            # Ports to end nodes generated in "setup_network"
         self._add_subprotocols(node,
                                self.port_names[0],
-                               self.port_names[1])
+                               self.port_names[1],
+                               self.reset_config)
 
         self.slots_A = self.node.qmemory.get_matching_positions(
             'origin', value='node_A')
@@ -51,9 +53,9 @@ class RepeaterProtocol(NodeProtocol):
         self.qubits_A = dict((slot, False) for slot in self.slots_A)                                                    # FIXME: a bit weird implementation
         self.qubits_B = dict((slot, False) for slot in self.slots_B)
 
-    def _add_subprotocols(self, node, port_name_A, port_name_B):
-        self.add_subprotocol(ManageMemory(node, port_name_A, 'manage_slots_node_A'))
-        self.add_subprotocol(ManageMemory(node, port_name_B, 'manage_slots_node_B'))
+    def _add_subprotocols(self, node, port_name_A, port_name_B, reset_config):
+        self.add_subprotocol(ManageMemory(node, port_name_A, reset_config, 'manage_slots_node_A'))
+        self.add_subprotocol(ManageMemory(node, port_name_B, reset_config, 'manage_slots_node_B'))
 
     def run(self):
         self.node.subcomponents["Clock_{}".format(self.node.name)].start()
@@ -113,7 +115,7 @@ class RepeaterProtocol(NodeProtocol):
 
 
 class ManageMemory(NodeProtocol):
-    def __init__(self, node, port_name, name):
+    def __init__(self, node, port_name, reset_config, name):
         super().__init__(node, name=name)
         self.operation = "OPERATION"
         self.add_signal(self.operation)
@@ -121,11 +123,11 @@ class ManageMemory(NodeProtocol):
         self.port_name = port_name
         self.slots = self.node.qmemory.get_matching_positions(
             'origin', value='{}'.format(self.name.replace('manage_slots_','')))
-        self._add_subprotocols(node)
+        self._add_subprotocols(node, reset_config)
 
-    def _add_subprotocols(self, node):
+    def _add_subprotocols(self, node, reset_config):
         self.add_subprotocol(ManageRouting(node, self.port_name, self.slots, name='route'))
-        self.add_subprotocol(MemoryAccess(node, self.slots, name='access'))
+        self.add_subprotocol(MemoryAccess(node, self.slots, reset_config, name='access'))
 
     def run(self):
         self.start_subprotocols()
@@ -144,15 +146,15 @@ class ManageMemory(NodeProtocol):
             self.send_signal(self.operation, operation)
 
 
-class MemoryAccess(NodeProtocol):   # FIXME: should start once qubits are expected to arrive, using delay and max ticks
+class MemoryAccess(NodeProtocol):
 
-    def __init__(self, node, slots, name):
+    def __init__(self, node, slots, reset_config, name):
         super().__init__(node, name=name)
         self.slots = slots
         self.slots_status = [True] * len(self.slots)
-        # FIXME: # cycles to reset is hardcoded : realize "300" being the period leads to reset taking 10ns * 300 cycles = 3000 ns
-        self.reset_time = 500
-        self.slots_reset_timer = [self.reset_time] * len(self.slots)
+        self.reset_period_cycles = reset_config['reset_period_cycles']
+        self.reset_duration_cycles = reset_config['reset_duration_cycles']
+        self.slots_reset_timer = [self.reset_duration_cycles] * len(self.slots)
 
         self.removed_qubit = "REMOVED"
         self.add_signal(self.removed_qubit)
@@ -166,12 +168,11 @@ class MemoryAccess(NodeProtocol):   # FIXME: should start once qubits are expect
                     self.slots_reset_timer[idx] -= 1
                     if self.slots_reset_timer[idx] == 0:
                         self.slots_status[idx] = True
-                        self.slots_reset_timer[idx] = self.reset_time
+                        self.slots_reset_timer[idx] = self.reset_duration_cycles
                         self.node.qmemory.mem_positions[self.slots[idx]].reset()
                         self.node.qmemory.set_position_used(False, idx)
 
-            # FIXME: cycles are hardcoded : realize with "50" cycles being the period, this means we reset every 10ns * 50 = 500 ns due to the clock frequency
-            if self.node.subcomponents["Clock_{}".format(self.node.name)].num_ticks % 50 == 0:
+            if self.node.subcomponents["Clock_{}".format(self.node.name)].num_ticks % self.reset_period_cycles == 0:
                 for idx, status in enumerate(self.slots_status):
                     if status is True:
                         self.slots_status[idx] = False
