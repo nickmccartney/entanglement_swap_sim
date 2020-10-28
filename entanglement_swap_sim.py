@@ -179,7 +179,8 @@ def run_simulation(sim_params, attempts, memory_depths):
         mem_config = {
             'use_memory': use_memory,
             'reset_period_cycles': sim_params['memory_reset_period'],
-            'reset_duration_cycles': sim_params['memory_reset_duration']
+            'reset_duration_cycles': sim_params['memory_reset_duration'],
+            'prob_detection': sim_params['probability_detection']
         }
         entangle_sim, dc = sim_setup(network, mem_config)
         entangle_sim.start()
@@ -272,7 +273,10 @@ def create_plot(sim_params, attempts, iterations, memory_depths):
                   ["Channel B", "Length (km)", sim_params['channel_B_length']],
                   ["", "Loss (dB/km)", sim_params['channel_B_loss']],
                   ["Memory", "T1 (ns)", sim_params['memory_T1']],
-                  ["", "T1 (ns)", sim_params['memory_T2']]]
+                  ["", "T1 (ns)", sim_params['memory_T2']],
+                  ["", "Reset Period (# cycles)", sim_params['memory_reset_period']],
+                  ["", "Reset Duration (# cycles)", sim_params['memory_reset_duration']],
+                  ["", "Probability of detection (%)", sim_params['probability_detection']]]
 
     table = plt.table(cellText=table_data,
                       cellLoc='left',
@@ -297,11 +301,12 @@ sim_params = {
     'memory_T1': 1.0e4,             # [ns]
     'memory_T2': 0.5e4,             # [ns]
     'memory_reset_period': 50,      # cycles of internal clock
-    'memory_reset_duration': 100    # cycles of internal clock
+    'memory_reset_duration': 100,    # cycles of internal clock
+    'probability_detection': 100     # probability of successful detection after interacting with memory
 }
 
 memory_depths = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,30,40,50]
-attempts = 100
+attempts = 10000
 iterations = 5
 
 create_plot(sim_params, attempts, iterations, memory_depths)

@@ -3,8 +3,6 @@ import netsquid as ns
 from netsquid.protocols import NodeProtocol, Signals
 from netsquid.components import QuantumProgram, instructions as instr
 
-from netsquid.components import Clock
-
 __all__ = [
     "RepeaterProtocol",
     "ManageRouting",
@@ -36,14 +34,14 @@ class RepeaterProtocol(NodeProtocol):
     def __init__(self, node, mem_config, name=None):
         super().__init__(node, name=name)
         self.use_memory = mem_config.pop('use_memory')
-        self.reset_config = mem_config
+        self.mem_config = mem_config
         self.result = None
         self._bsm_results = [(0, 0), (0, 1), (1, 0), (1, 1)]                                                            # Bell state measurement results
         self.port_names = list(dict(self.node.ports).keys())                                                            # Ports to end nodes generated in "setup_network"
         self._add_subprotocols(node,
                                self.port_names[0],
                                self.port_names[1],
-                               self.reset_config)
+                               self.mem_config)
 
         self.slots_A = self.node.qmemory.get_matching_positions(
             'origin', value='node_A')
@@ -53,9 +51,9 @@ class RepeaterProtocol(NodeProtocol):
         self.qubits_A = dict((slot, False) for slot in self.slots_A)                                                    # FIXME: a bit weird implementation
         self.qubits_B = dict((slot, False) for slot in self.slots_B)
 
-    def _add_subprotocols(self, node, port_name_A, port_name_B, reset_config):
-        self.add_subprotocol(ManageMemory(node, port_name_A, reset_config, 'manage_slots_node_A'))
-        self.add_subprotocol(ManageMemory(node, port_name_B, reset_config, 'manage_slots_node_B'))
+    def _add_subprotocols(self, node, port_name_A, port_name_B, mem_config):
+        self.add_subprotocol(ManageMemory(node, port_name_A, mem_config, 'manage_slots_node_A'))
+        self.add_subprotocol(ManageMemory(node, port_name_B, mem_config, 'manage_slots_node_B'))
 
     def run(self):
         self.node.subcomponents["Clock_{}".format(self.node.name)].start()
@@ -115,7 +113,7 @@ class RepeaterProtocol(NodeProtocol):
 
 
 class ManageMemory(NodeProtocol):
-    def __init__(self, node, port_name, reset_config, name):
+    def __init__(self, node, port_name, mem_config, name):
         super().__init__(node, name=name)
         self.operation = "OPERATION"
         self.add_signal(self.operation)
@@ -123,11 +121,12 @@ class ManageMemory(NodeProtocol):
         self.port_name = port_name
         self.slots = self.node.qmemory.get_matching_positions(
             'origin', value='{}'.format(self.name.replace('manage_slots_','')))
-        self._add_subprotocols(node, reset_config)
+        self._add_subprotocols(node, mem_config)
+        self.prob_detect = mem_config['prob_detection']
 
-    def _add_subprotocols(self, node, reset_config):
+    def _add_subprotocols(self, node, mem_config):
         self.add_subprotocol(ManageRouting(node, self.port_name, self.slots, name='route'))
-        self.add_subprotocol(MemoryAccess(node, self.slots, reset_config, name='access'))
+        self.add_subprotocol(MemoryAccess(node, self.slots, mem_config, name='access'))
 
     def run(self):
         self.start_subprotocols()
@@ -136,24 +135,25 @@ class ManageMemory(NodeProtocol):
                          self.await_signal(self.subprotocols['access'], "REMOVED")
 
             if expr.first_term.value:
-                slot = self.subprotocols['route'].get_signal_result(label="ADDED", receiver=self)
-                operation = {"op": "ADD", "slot": slot}
+                if np.random.random_integers(1,100) <= self.prob_detect:                                                                         # FIXME: hacky attempt to force losses of counting qubits in memory
+                    slot = self.subprotocols['route'].get_signal_result(label="ADDED", receiver=self)
+                    operation = {"op": "ADD", "slot": slot}
+                    self.send_signal(self.operation, operation)
             else:
                 slot = self.subprotocols['access'].get_signal_result(label="REMOVED", receiver=self)
                 operation = {"op": "REMOVE", "slot": slot}
+                self.send_signal(self.operation, operation)
 
-
-            self.send_signal(self.operation, operation)
 
 
 class MemoryAccess(NodeProtocol):
 
-    def __init__(self, node, slots, reset_config, name):
+    def __init__(self, node, slots, mem_config, name):
         super().__init__(node, name=name)
         self.slots = slots
         self.slots_status = [True] * len(self.slots)
-        self.reset_period_cycles = reset_config['reset_period_cycles']
-        self.reset_duration_cycles = reset_config['reset_duration_cycles']
+        self.reset_period_cycles = mem_config['reset_period_cycles']
+        self.reset_duration_cycles = mem_config['reset_duration_cycles']
         self.slots_reset_timer = [self.reset_duration_cycles] * len(self.slots)
 
         self.removed_qubit = "REMOVED"
