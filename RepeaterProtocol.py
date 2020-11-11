@@ -36,20 +36,20 @@ class RepeaterProtocol(NodeProtocol):
         super().__init__(node, name=name)
         # generate assignments to pass to subprotocols
         self.port_names = list(dict(self.node.ports).keys())                                                                 # Ports to end nodes generated in "setup_network"
-        slots_A = self.node.qmemory.get_matching_positions(
+        self.slots_A = self.node.qmemory.get_matching_positions(
             'origin', value='node_A')
-        slots_B = self.node.qmemory.get_matching_positions(
+        self.slots_B = self.node.qmemory.get_matching_positions(
             'origin', value='node_B')
         self._add_subprotocols(node,
                                self.port_names[0],
-                               slots_A,
+                               self.slots_A,
                                self.port_names[1],
-                               slots_B,
+                               self.slots_B,
                                mem_config)
 
         self.use_memory = mem_config.pop('use_memory')
-        self.qubits_A = dict((slot, False) for slot in slots_A)                                                    # FIXME: a bit weird implementation
-        self.qubits_B = dict((slot, False) for slot in slots_B)
+        self.qubits_A = dict((slot, False) for slot in self.slots_A)                                                    # FIXME: a bit weird implementation
+        self.qubits_B = dict((slot, False) for slot in self.slots_B)
         self.result = None
         # self._bsm_results = [(0, 0), (0, 1), (1, 0), (1, 1)]                                                            # Bell state measurement results
 
@@ -76,25 +76,54 @@ class RepeaterProtocol(NodeProtocol):
                     self.qubits_B[stored_idx] = True
                     # print(f"NEW IDX STORED ON : {stored_idx} where total slots = {self.node.qmemory.num_positions}")
 
-                for idx_A, status_A in self.qubits_A.items():
-                    for idx_B, status_B in self.qubits_B.items():
-                        if status_A and status_B:
-                            self.qubits_A[idx_A] = False
-                            self.qubits_B[idx_B] = False
-                            print(f"SUCCESS {idx_A, idx_B}")
+                # FIXME: find 'FILLED' slot on each side
+                slot_A = None
+                slot_B = None
+                for slot in self.slots_A:
+                    status = self.node.qmemory.mem_positions[slot].properties['status']
+                    if status == "FILLED":
+                        slot_A = slot
+                        break
+                for slot in self.slots_B:
+                    status = self.node.qmemory.mem_positions[slot].properties['status']
+                    if status == "FILLED":
+                        slot_B = slot
+                        break
 
-                            q1, = self.node.qmemory.peek(idx_A)
-                            q2, = self.node.qmemory.peek(idx_B)
-                            result = {
-                                'qubits': [q1, q2]
-                            }
-                            self.send_signal(Signals.SUCCESS, result=result)
-                            self.node.qmemory.mem_positions[idx_A].properties['status'] = "RESET"
-                            self.node.qmemory.mem_positions[idx_B].properties['status'] = "RESET"
-                            break
-                        else:
-                            continue
-                    break
+                if slot_A and slot_B:   # FIXME: should only not enter if one is still "None"
+                    print(self.node.qmemory.mem_positions[slot_A].properties['status'])
+                    print(self.node.qmemory.mem_positions[slot_B].properties['status'])
+                    print(f"SUCCESS {slot_A, slot_B}")
+                    q1, = self.node.qmemory.pop(slot_A)
+                    q2, = self.node.qmemory.pop(slot_B)
+                    result = {
+                        'qubits': [q1, q2]
+                    }
+                    self.send_signal(Signals.SUCCESS, result=result)
+                    self.node.qmemory.mem_positions[slot_A].properties['status'] = "RESET"
+                    self.node.qmemory.mem_positions[slot_B].properties['status'] = "RESET"
+
+                # for idx_A, status_A in self.qubits_A.items():
+                #     for idx_B, status_B in self.qubits_B.items():
+                #         if status_A and status_B:
+                #             print(self.node.qmemory.mem_positions[idx_A].properties['status'])
+                #             print(self.node.qmemory.mem_positions[idx_B].properties['status'])
+                #             self.qubits_A[idx_A] = False
+                #             self.qubits_B[idx_B] = False
+                #             print(f"SUCCESS {idx_A, idx_B}")
+                #
+                #             q1, = self.node.qmemory.peek(idx_A)
+                #             q2, = self.node.qmemory.peek(idx_B)
+                #             result = {
+                #                 'qubits': [q1, q2]
+                #             }
+                #             self.send_signal(Signals.SUCCESS, result=result)
+                #             self.node.qmemory.mem_positions[idx_A].properties['status'] = "RESET"
+                #             self.node.qmemory.mem_positions[idx_B].properties['status'] = "RESET"
+                #             break
+                #         else:
+                #             continue
+                #     break
 
                 #
                 # for idx_A, status_A in self.qubits_A.items():
@@ -253,13 +282,7 @@ class MemoryRouting(NodeProtocol):
             expr = yield self.await_signal(self.subprotocols['access_'+self.node_name], "NEW_IDX") | \
                          self.await_port_input(self.node.ports[self.input_port])                                        # await either a new idx to store incoming qubits to, or incoming qubit FIXME : not using signal yet
 
-            # if expr.first_term.value:
-            #     self.current_slot_idx = self.subprotocols['access_'+self.node_name].get_signal_result(
-            #         label="NEW_IDX", receiver=self)                                                                     # assign current_slot_idx designated by MemoryAccess protocol
-            # else:
-            print("SEARCHING FOR NEW TARGET")
             target_slot = self._get_target_slot()
-            print(f"DONE: TARGET = {target_slot}")
 
             if self.node.qmemory.peek(self.storage_idx) is not None:
                 if target_slot != None:                                                                         # realize -1 is only assigned to represent no available slots for storage
@@ -307,14 +330,16 @@ class MemoryAccess(NodeProtocol):
         self.node.qmemory.mem_positions[slot].properties['status'] = "IDLE"                                             # assign slot IDLE status, available for use
 
     def _get_new_target(self):                                                                                          # find slot to assign as TARGET
-        for slot in self.slots:
+        for slot in self.slots:                                                                                         # check if there is existing target
             status = self.node.qmemory.mem_positions[slot].properties['status']
-            print(f"LOOKING FOR NEW TARGET: {status}")
-            if status == "IDLE":                                                                                        # FIXME: should implement signal now? (signal with value or allow protocol to search for updated target using propeties?)
+            if status == "TARGET":
+                return
+
+        for slot in self.slots:                                                                                         # check if there is was no TARGET, try to assign first IDLE slot as TARGET
+            status = self.node.qmemory.mem_positions[slot].properties['status']
+            if status == "IDLE":
                 self.node.qmemory.mem_positions[slot].properties['status'] = "TARGET"                                   # assign new target slot
-            else:
-                continue
-            return
+                return
 
     def run(self):
         target_slot = self.slots[0]
