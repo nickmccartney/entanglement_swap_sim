@@ -35,14 +35,18 @@ class SimulationProtocol(LocalProtocol):
 
     """
 
-    def __init__(self, node_A, node_B, node_R, mem_config):
+    def __init__(self, node_A, node_B, node_R, source_config, memory_config):
         super().__init__(nodes={'A': node_A, 'B': node_B, 'R': node_R}, name='Simulation Protocol')
-        self._add_subprotocols(node_A,node_B,node_R, mem_config)
+        self._add_subprotocols(node_A,
+                               node_B,
+                               node_R,
+                               source_config,
+                               memory_config)
 
-    def _add_subprotocols(self, node_A, node_B, node_R, mem_config):
-        self.add_subprotocol(SourceProtocol(node_A, name='source_A'))
-        self.add_subprotocol(SourceProtocol(node_B, name='source_B'))
-        self.add_subprotocol(RepeaterProtocol(node_R, mem_config, name='repeater_R'))
+    def _add_subprotocols(self, node_A, node_B, node_R, source_config, memory_config):
+        self.add_subprotocol(SourceProtocol(node_A, source_config, name='source_A'))
+        self.add_subprotocol(SourceProtocol(node_B, source_config, name='source_B'))
+        self.add_subprotocol(RepeaterProtocol(node_R, memory_config, name='repeater_R'))
 
     def run(self):
         self.start_subprotocols()
@@ -51,18 +55,21 @@ class SimulationProtocol(LocalProtocol):
 
             repeater_result = self.subprotocols['repeater_R'].get_signal_result(label=Signals.SUCCESS, receiver=self)
             q1,q2 = repeater_result['qubits']                                             # grab/remove qubits after measurement FIXME: Figure out actual interpretation of results
-            print(f"In sim protocol q1 \n{q1}")
-            print(f"In sim protocol q2 \n{q2}")
+
             if q1 is not None and q2 is not None:
-                # print(q1.qstate, q2.qstate)
-                fid_q1 = qapi.fidelity(q1, ks.y0, squared=True)
-                fid_q2 = qapi.fidelity(q2, ks.y0, squared=True)
-                fid_joint = qapi.fidelity([q1,q2], ks.y00, squared=True)
+                # fid_q1 = qapi.fidelity(q1, ks.y0, squared=True)
+                # fid_q2 = qapi.fidelity(q2, ks.y0, squared=True)
+                fid_joint = qapi.fidelity([q1,q2], ks.s11, squared=True)
+                # result = {
+                #     'fid_q1': fid_q1,
+                #     'pos_A': None,                                                                                      # FIXME: Useful for extra statistics to plot, would need to pass which slot was used for measurement
+                #     'fid_q2': fid_q2,
+                #     'pos_B': None,                                                                                      # FIXME: Useful for extra statistics to plot, would need to pass which slot was used for measurement
+                #     'fid_joint': fid_joint
+                # }
                 result = {
-                    'fid_q1': fid_q1,
-                    'pos_A': None,                                                                                      # FIXME: Not used yet
-                    'fid_q2': fid_q2,
-                    'pos_B': None,                                                                                      # FIXME: Not used yet
+                    'pos_A': None,                                                                                      # FIXME: Useful for extra statistics to plot, would need to pass which slot was used for measurement
+                    'pos_B': None,                                                                                      # FIXME: Useful for extra statistics to plot, would need to pass which slot was used for measurement
                     'fid_joint': fid_joint
                 }
                 self.send_signal(Signals.SUCCESS, result=result)

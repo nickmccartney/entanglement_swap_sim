@@ -51,7 +51,7 @@ class RepeaterProtocol(NodeProtocol):
         self.qubits_A = dict((slot, False) for slot in self.slots_A)                                                    # FIXME: a bit weird implementation
         self.qubits_B = dict((slot, False) for slot in self.slots_B)
         self.result = None
-        # self._bsm_results = [(0, 0), (0, 1), (1, 0), (1, 1)]                                                            # Bell state measurement results
+        self._bsm_results = [(0, 0), (0, 1), (1, 0), (1, 1)]                                                            # Bell state measurement results
 
     def _add_subprotocols(self, node, port_name_A, slots_A, port_name_B, slots_B, mem_config):
         self.add_subprotocol(MemoryRouting(node, port_name_A, slots_A, mem_config, 'route_node_A'))
@@ -64,19 +64,10 @@ class RepeaterProtocol(NodeProtocol):
         else:
             self.start_subprotocols()
             while True:
+                # FIXME: being bottlenecked somewhere I beleive, could it be due to waiting on signal that isnt sent often enough
                 expr = yield self.await_signal(self.subprotocols['route_node_A'], "STORED") | \
                              self.await_signal(self.subprotocols['route_node_B'], "STORED")
 
-                if expr.first_term.value:
-                    stored_idx = self.subprotocols['route_node_A'].get_signal_result("STORED", receiver=self)
-                    self.qubits_A[stored_idx] = True
-                    # print(f"NEW IDX STORED ON : {stored_idx} where total slots = {self.node.qmemory.num_positions}")
-                else:
-                    stored_idx = self.subprotocols['route_node_B'].get_signal_result("STORED", receiver=self)
-                    self.qubits_B[stored_idx] = True
-                    # print(f"NEW IDX STORED ON : {stored_idx} where total slots = {self.node.qmemory.num_positions}")
-
-                # FIXME: find 'FILLED' slot on each side
                 slot_A = None
                 slot_B = None
                 for slot in self.slots_A:
@@ -90,140 +81,48 @@ class RepeaterProtocol(NodeProtocol):
                         slot_B = slot
                         break
 
-                if slot_A and slot_B:   # FIXME: should only not enter if one is still "None"
-                    print(self.node.qmemory.mem_positions[slot_A].properties['status'])
-                    print(self.node.qmemory.mem_positions[slot_B].properties['status'])
-                    print(f"SUCCESS {slot_A, slot_B}")
+                if slot_A and slot_B:
+                    # prog = BellMeasurementProgram()
+                    # if self.node.qmemory.busy:
+                    #     yield self.await_program(self.node.qmemory)
+                    # self.node.qmemory.execute_program(prog, qubit_mapping=[slot_A, slot_B])
+                    # yield self.await_program(self.node.qmemory)
+                    # idx, = prog.output['BellStateIndex']
+                    # print(f"AFTER MEASURE : {self._bsm_results[idx]}")
                     q1, = self.node.qmemory.pop(slot_A)
                     q2, = self.node.qmemory.pop(slot_B)
                     result = {
                         'qubits': [q1, q2]
                     }
                     self.send_signal(Signals.SUCCESS, result=result)
+
+
                     self.node.qmemory.mem_positions[slot_A].properties['status'] = "RESET"
                     self.node.qmemory.mem_positions[slot_B].properties['status'] = "RESET"
-
-                # for idx_A, status_A in self.qubits_A.items():
-                #     for idx_B, status_B in self.qubits_B.items():
-                #         if status_A and status_B:
-                #             print(self.node.qmemory.mem_positions[idx_A].properties['status'])
-                #             print(self.node.qmemory.mem_positions[idx_B].properties['status'])
-                #             self.qubits_A[idx_A] = False
-                #             self.qubits_B[idx_B] = False
-                #             print(f"SUCCESS {idx_A, idx_B}")
-                #
-                #             q1, = self.node.qmemory.peek(idx_A)
-                #             q2, = self.node.qmemory.peek(idx_B)
-                #             result = {
-                #                 'qubits': [q1, q2]
-                #             }
-                #             self.send_signal(Signals.SUCCESS, result=result)
-                #             self.node.qmemory.mem_positions[idx_A].properties['status'] = "RESET"
-                #             self.node.qmemory.mem_positions[idx_B].properties['status'] = "RESET"
-                #             break
-                #         else:
-                #             continue
-                #     break
-
-                #
-                # for idx_A, status_A in self.qubits_A.items():
-                #     if status_A == True:
-                #         print(f"Checking idx_A {idx_A} on memory {self.node.qmemory.peek(idx_A)}")
-                #         if self.node.qmemory.get_position_used(idx_A):                                                      # if 'used' means in reset
-                #             self.qubits_A[idx_A] = False
-                #         else:
-                #             for idx_B, status_B in self.qubits_B.items():
-                #                 print(f"Checking idx_B {idx_B} on memory {self.node.qmemory.peek(idx_B)}")
-                #                 if self.node.qmemory.get_position_used(idx_B):
-                #                     self.qubits_B[idx_B] = False
-                #                 else:
-                #                     print(f"SENDING SUCCESSFUL MEASAUREMENT WHERE q1 = {self.node.qmemory.peek(idx_A)} and q2 = {self.node.qmemory.peek(idx_B)}")
-                #                     q1, = self.node.qmemory.pop(idx_A)
-                #                     q2, = self.node.qmemory.pop(idx_B)
-                #                     result = {
-                #                         'qubits': [q1, q2]
-                #                     }
-                #                     self.send_signal(Signals.SUCCESS, result=result)
-                #                     self.qubits_A[idx_A] = False
-                #                     self.qubits_B[idx_B] = False
-
-                # expr = yield self.await_signal(self.subprotocols['manage_slots_node_A'], "OPERATION") | \
-                #              self.await_signal(self.subprotocols['manage_slots_node_B'], "OPERATION")
-
-                # # manage instructions for memory A
-                # if expr.first_term.value:
-                #     operation = self.subprotocols['manage_slots_node_A'].get_signal_result("OPERATION", receiver=self)
-                #     if operation["op"] == "ADD":
-                #         self.qubits_A[operation["slot"]] = True
-                #     elif operation["op"] == "REMOVE":
-                #         self.qubits_A[operation["slot"]] = False
-                #
-                # # manage instruction for memory B
-                # else:
-                #     operation = self.subprotocols['manage_slots_node_B'].get_signal_result("OPERATION", receiver=self)
-                #     if operation["op"] == "ADD":
-                #         self.qubits_B[operation["slot"]] = True
-                #     elif operation["op"] == "REMOVE":
-                #         self.qubits_B[operation["slot"]] = False
-
-                # # FIXME: MUST BE BETTER WAY TO DO THIS PAIR  CHECKING
-                # for idx_A in self.slots_A:
-                #     if self.qubits_A[idx_A] is True:
-                #         for idx_B in self.slots_B:
-                #             if self.qubits_B[idx_B] is True:
-                #                 result = {
-                #                      'slots': [idx_A, idx_B]
-                #                 }
-                #                 self.qubits_A[idx_A] = False
-                #                 self.qubits_B[idx_B] = False
-                #                 self.send_signal(Signals.SUCCESS, result=result)
 
 
     def _run_no_mem(self):                                                                                              # special run case for when memory should not store qubit for any measurable time
         while True:
-            expr = yield self.await_port_input(self.node.ports[self.port_names[0]]) & \
+            expr = yield self.await_port_input(self.node.ports[self.port_names[0]]) | \
                          self.await_port_input(self.node.ports[self.port_names[1]])                                     # wait until qubits arrive at same time FIXME: possibly give some lenience
 
             q1, = self.node.qmemory.pop(0)
             q2, = self.node.qmemory.pop(1)
-            result = {
-                'qubits': [q1, q2]
-            }
-            self.send_signal(Signals.SUCCESS, result=result)
 
+            if q1 and q2:
+                result = {
+                    'qubits': [q1, q2]
+                }
+                self.send_signal(Signals.SUCCESS, result=result)
+            # if expr.first_term.value and expr.second_term.value:
+            #     print(expr.first_term.value, expr.second_term.value)
+            #     q1, = self.node.qmemory.pop(0)
+            #     q2, = self.node.qmemory.pop(1)
+            #     result = {
+            #         'qubits': [q1, q2]
+            #     }
+            #     self.send_signal(Signals.SUCCESS, result=result)
 
-# class ManageMemory(NodeProtocol):
-#     def __init__(self, node, port_name, mem_config, name):
-#         super().__init__(node, name=name)
-#         self.operation = "OPERATION"
-#         self.add_signal(self.operation)
-#         # determine which slots will be managed
-#         self.port_name = port_name
-#         self.node_name = self.name.replace('manage_slots_','')
-#         self.slots = self.node.qmemory.get_matching_positions('origin', value=self.node_name)
-#         self._add_subprotocols(node, mem_config)
-#         self.prob_detect = mem_config['prob_detection']
-#
-#     def _add_subprotocols(self, node, mem_config):
-#         self.add_subprotocol(ManageRouting(node, self.port_name, self.slots, name='route_'+self.node_name))
-#         self.add_subprotocol(MemoryAccess(node, self.slots, mem_config, name='access_'+self.node_name))
-#
-#     def run(self):
-#         self.start_subprotocols()
-#         while True:
-#             expr = yield self.await_signal(self.subprotocols['route_'+self.node_name], "ADDED") | \
-#                          self.await_signal(self.subprotocols['access_'+self.node_name], "REMOVED")
-#
-#             if expr.first_term.value:
-#                 if np.random.random_integers(1,100) <= self.prob_detect:                                                                         # FIXME: hacky attempt to force losses of counting qubits in memory
-#                     slot = self.subprotocols['route_'+self.node_name].get_signal_result(label="ADDED", receiver=self)
-#                     operation = {"op": "ADD", "slot": slot}
-#                     self.send_signal(self.operation, operation)
-#             else:
-#                 slot = self.subprotocols['access_'+self.node_name].get_signal_result(label="REMOVED", receiver=self)
-#                 operation = {"op": "REMOVE", "slot": slot}
-#                 self.send_signal(self.operation, operation)
-#
 
 class MemoryRouting(NodeProtocol):
     """Subprotocol of "RepeaterProtocol": manages routing incoming qubits
@@ -245,7 +144,7 @@ class MemoryRouting(NodeProtocol):
 
     def __init__(self, node, port_name, slots, mem_config, name):
         super().__init__(node, name=name)
-        self.prob_detection = mem_config['prob_detection']                                                              # probability that qubit is detected after interacting with memory
+        self.probability_detection = mem_config['probability_detection']                                                              # probability that qubit is detected after interacting with memory
 
         self.input_port = port_name
 
@@ -286,7 +185,7 @@ class MemoryRouting(NodeProtocol):
 
             if self.node.qmemory.peek(self.storage_idx) is not None:
                 if target_slot != None:                                                                         # realize -1 is only assigned to represent no available slots for storage
-                    detected = True if np.random.random_integers(1,100) <= self.prob_detection else False
+                    detected = True if np.random.random_integers(1,100) <= self.probability_detection else False
                     prog = MemoryBehavior()
                     prog.set_detected(detected)
                     if self.node.qmemory.busy:
@@ -346,17 +245,17 @@ class MemoryAccess(NodeProtocol):
         self.node.qmemory.mem_positions[target_slot].properties['status'] = "TARGET"                                    # indicates to "MemoryRouting" protocol which slot to attempt to store on
 
         while True:
+
             yield self.await_port_output(self.node.subcomponents["Clock_{}".format(self.node.name)].ports['cout'])
 
             for slot in self.slots:
                 status = self.node.qmemory.mem_positions[slot].properties['status']
                 if status == "RESET":
                     if self.reset_timer[slot] == 0:
-                        self._reset_state(slot)                                                                         # FIXME: should we check if there is a missing TARGET, if so can call "_get_new_target()" -----> see other FIXME below for insight
+                        self._reset_state(slot)
                         self.reset_timer[slot] = self.reset_duration_cycles                                             # restore reset timer for next time
                     else:
                         self.reset_timer[slot] -= 1
-                        print(f"DECREASE RESET TIMER: idx = {slot}, timer = {self.reset_timer[slot]}")
                 elif status == "TARGET":
                     if self.reset_trigger_timer[slot] == 0:
                         self.node.qmemory.mem_positions[slot].properties['status'] = "RESET"                            # flag slot as RESET
@@ -369,7 +268,7 @@ class MemoryAccess(NodeProtocol):
                         self.node.qmemory.mem_positions[slot].properties['status'] = "RESET"                            # flag slot as RESET
                         self.reset_trigger_timer[slot] = self.reset_period_cycles                                       # reset timer for next occurrence
                     else:
-                        self.reset_trigger_timer[slot] -= 1                                                             # FIXME : check for if there is no TARGET, if so, call _get_new_target()  ------> instead of two calls, do this conditionally after status check
+                        self.reset_trigger_timer[slot] -= 1
 
                 elif status == "FILLED":
                     if self.reset_trigger_timer[slot] == 0:
@@ -377,8 +276,8 @@ class MemoryAccess(NodeProtocol):
                         self.reset_trigger_timer[slot] = self.reset_period_cycles                                       # reset timer for next occurrence
                     else:
                         self.reset_trigger_timer[slot] -= 1
-            self._get_new_target()
 
+                self._get_new_target()
 
 
 
@@ -437,7 +336,7 @@ class MemoryAccess(NodeProtocol):
 #
 #     def __init__(self, node, port_name, slots, mem_config, name):
 #         super().__init__(node, name=name)
-#         self.prob_detection = mem_config['prob_detection']                                                              # probability that qubit is detected after interacting with memory
+#         self.probability_detection = mem_config['probability_detection']                                                              # probability that qubit is detected after interacting with memory
 #
 #         self.input_port = port_name
 #         self.current_slot_idx = -1                                                                                      # current slot index to store qubits in, no slots available when -1     # FIXME: THIS FORCES SLOTS TO RESET BEFORE current_slot_idx is assigned
@@ -471,7 +370,7 @@ class MemoryAccess(NodeProtocol):
 #             else:
 #                 if self.node.qmemory.peek(self.storage_idx) is not None:
 #                     if self.current_slot_idx != -1:                                                                         # realize -1 is only assigned to represent no available slots for storage
-#                         detected = True if np.random.random_integers(1,100) <= self.prob_detection else False
+#                         detected = True if np.random.random_integers(1,100) <= self.probability_detection else False
 #                         prog = MemoryBehavior()
 #                         prog.set_detected(detected)
 #                         if self.node.qmemory.busy:
@@ -551,11 +450,11 @@ class MemoryBehavior(QuantumProgram):
     def program(self, **kwargs):
         q0,q1 = self.get_qubit_indices(2)
         self.apply(instr.INSTR_CZ, [q0,q1])
-        self.apply(instr.INSTR_MEASURE_X, [q0], output_key="m1")
+        self.apply(instr.INSTR_MEASURE_X, [q0], output_key='measure_X')
         yield self.run()
 
         if self._detected:
-            if self.output["m1"] == 1:
+            if self.output['measure_X'] == 1:
                 self.apply(instr.INSTR_H, [q1])
                 self.apply(instr.INSTR_Z, [q1])
             else:
