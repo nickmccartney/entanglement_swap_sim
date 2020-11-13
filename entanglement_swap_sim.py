@@ -10,9 +10,9 @@ from netsquid.protocols import Signals
 from netsquid.qubits import StateSampler, QFormalism, ketstates as ks
 from netsquid.util.datacollector import DataCollector
 
-from qsource import QSource                                                                                             # use localy modified version of QSource
+from netsquid.components import QSource
+# from qsource import QSource                                                                                             # use localy modified version of QSource (from when trying to use "Number state" qubits)
 from FibreLossModel import FibreLossModel
-# from FreeSpaceErrorModel import FreeSpaceErrorModel
 from SimulationProtocol import SimulationProtocol
 
 
@@ -80,9 +80,8 @@ def setup_network(source_attempts,
                        state_sampler=state_sampler,
                        num_ports=2,
                        status=SourceStatus.EXTERNAL,
-                       properties={'is_number_state': False},                                                           # FIXME: WHY IS THIS USED AGAIN?, seems that we can decay qubit state just fine in memory
                        output_meta={'qm_replace': True, 'qm_positions': [0]})                                           # allow incoming qubits to replace anything in slot 0, recall we use the default slots only to sort into slots with QProgram
-    clock_a = Clock(name='Clock_node_A', models=clock_model, start_delay=clock_A_delay, max_ticks=source_attempts)                                        # "max_ticks" will timeout the program after desired number of connection attempts
+    clock_a = Clock(name='Clock_node_A', models=clock_model, start_delay=clock_A_delay, max_ticks=source_attempts)      # "max_ticks" will timeout the program after desired number of connection attempts
     node_a.add_subcomponent(source_a)
     node_a.add_subcomponent(clock_a)
 
@@ -91,9 +90,8 @@ def setup_network(source_attempts,
                        state_sampler=state_sampler,
                        num_ports=2,
                        status=SourceStatus.EXTERNAL,
-                       properties={'is_number_state': False},
-                       output_meta={'qm_replace': True, 'qm_positions': [1]})                                                                # allow incoming qubits to replace anything in slot 1, recall we use the default slots only to sort into slots with QProgram
-    clock_b = Clock(name='Clock_node_B', models=clock_model, start_delay=clock_B_delay, max_ticks=source_attempts)                                        # "max_ticks" will timeout the program after desired number of connection attempts
+                       output_meta={'qm_replace': True, 'qm_positions': [1]})                                           # allow incoming qubits to replace anything in slot 1, recall we use the default slots only to sort into slots with QProgram
+    clock_b = Clock(name='Clock_node_B', models=clock_model, start_delay=clock_B_delay, max_ticks=source_attempts)      # "max_ticks" will timeout the program after desired number of connection attempts
     node_b.add_subcomponent(source_b)
     node_b.add_subcomponent(clock_b)
 
@@ -212,13 +210,9 @@ def run_simulation(sim_params, attempts, memory_depths):
         if dc.dataframe.empty:                                                                                          # build df for case with no successes
             data = [{'Memory Depth': memory_depth,
                      'num_meas': 0,
-                     # 'fid_q1': None,
-                     # 'fid_q2': None,
                      'fid_joint': None}]
             df = pandas.DataFrame(data)
         else:                                                                                                           # build df for each run from data collector
-            # fid_q1 = dc.dataframe['fid_q1'].mean()                                                                      # avg fidelity of qubits used from node A
-            # fid_q2 = dc.dataframe['fid_q2'].mean()                                                                      # avg fidelity of qubits used from node B
             fid_joint = dc.dataframe['fid_joint'].mean()                                                                # avg joint fidelity
             num_meas = len(dc.dataframe)                                                                                # number of measurement events during run
             mem_use_A = dc.dataframe['pos_A'].value_counts()
@@ -226,8 +220,6 @@ def run_simulation(sim_params, attempts, memory_depths):
             mem_use = mem_use_A.append(mem_use_B)                                                                       # FIXME: for future use, tracking which mem slots are used
             data = [{'Memory Depth': memory_depth,
                      'num_meas': num_meas,
-                     # 'fid_q1': fid_q1,
-                     # 'fid_q2': fid_q2,
                      'fid_joint': fid_joint}]
 
             df = pandas.DataFrame(data)                                                                                 # pack data on each run in df
@@ -250,15 +242,10 @@ def create_plot(sim_params, attempts, iterations, memory_depths):
     from matplotlib import pyplot as plt
     total_data = repeat_simulation(sim_params, attempts, iterations, memory_depths)                                     # gather simulation data
 
-    # avg_data = total_data.groupby('Memory Depth')[['num_meas', 'fid_q1', 'fid_q2', 'fid_joint']].agg(
-    #     {'num_meas': ['mean', 'std'],
-    #      'fid_q1': ['mean', 'std'],
-    #      'fid_q2': ['mean', 'std'],
-    #      'fid_joint': ['mean', 'std']}).reset_index()                                                                   # compute average and std of data over all iterations
 
     avg_data = total_data.groupby('Memory Depth')[['num_meas', 'fid_joint']].agg(
         {'num_meas': ['mean', 'std'],
-         'fid_joint': ['mean', 'std']}).reset_index()  # compute average and std of data over all iterations
+         'fid_joint': ['mean', 'std']}).reset_index()                                                                   # compute average and std of data over all iterations
 
     fig = plt.figure()
     fig.set_size_inches(16,9)
@@ -276,10 +263,6 @@ def create_plot(sim_params, attempts, iterations, memory_depths):
 
     # Plot avg fidelity data vs memory depth
     ax = plt.subplot(2,2,2)
-    # plt.errorbar(avg_data['Memory Depth'], avg_data['fid_q1']['mean'], yerr=avg_data['fid_q1']['std'],
-    #              capsize=4, ecolor='k', fmt='bo-', markersize=4, label='Fidelity from node A')
-    # plt.errorbar(avg_data['Memory Depth'], avg_data['fid_q2']['mean'], yerr=avg_data['fid_q2']['std'],
-    #              capsize=4, ecolor='k', fmt='rs--', markersize=4, label='Fidelity from node B')
     plt.errorbar(avg_data['Memory Depth'], avg_data['fid_joint']['mean'], yerr=avg_data['fid_joint']['std'],
                  capsize=4, ecolor='k', fmt='gd-.', markersize=4, label='Joint Fidelity')
     plt.xlabel("Memory Depth (per connection)")
@@ -338,7 +321,7 @@ sim_params = {
 }
 
 memory_depths = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,30,40,50]
-attempts = 10000
+attempts = 1000
 iterations = 5
 
 create_plot(sim_params, attempts, iterations, memory_depths)

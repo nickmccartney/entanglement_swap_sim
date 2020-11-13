@@ -21,15 +21,21 @@ class SimulationProtocol(LocalProtocol):
         Node to function as source_B
     node_R : :py:class:`~netsquid.nodes.node.Node`
         Node to function as central repeater
-    use_memory : bool
-        Allows for switching to _run_no_memory case in subprotocol 'repeater_R'
+    source_config : dict
+        source_config['probability_emission'] : float
+            Parameter assignment allowing for simplified configuration
+    mem_config : dict
+        mem_config['probability_detection']
+        mem_config['reset_period_cycles']
+        mem_config['reset_duration_cycles']
+            Parameter assignments allowing for simplified configuration, passed on to proper protocols
 
     Subprotocols
     ------------
     source__A : class:'SourceProtocol'
-        Allows for tracking of source emission on node_A
+        Controls probabilistic emission of source in node_A
 `   source__B : class:'SourceProtocol'
-        Allows for tracking of source emission on node_B
+        Controls probabilistic emission of source in node_B
     repeater_R : class:'RepeaterProtocol'
         Manages identification of qubit pairs and measurement reporting
 
@@ -54,22 +60,13 @@ class SimulationProtocol(LocalProtocol):
             yield self.await_signal(self.subprotocols['repeater_R'], Signals.SUCCESS)
 
             repeater_result = self.subprotocols['repeater_R'].get_signal_result(label=Signals.SUCCESS, receiver=self)
-            q1,q2 = repeater_result['qubits']                                             # grab/remove qubits after measurement FIXME: Figure out actual interpretation of results
+            q1,q2 = repeater_result['qubits']                                                                           # retrieve qubits that were popped from memory by RepeaterProtocol
 
-            if q1 is not None and q2 is not None:
-                # fid_q1 = qapi.fidelity(q1, ks.y0, squared=True)
-                # fid_q2 = qapi.fidelity(q2, ks.y0, squared=True)
-                fid_joint = qapi.fidelity([q1,q2], ks.s11, squared=True)
-                # result = {
-                #     'fid_q1': fid_q1,
-                #     'pos_A': None,                                                                                      # FIXME: Useful for extra statistics to plot, would need to pass which slot was used for measurement
-                #     'fid_q2': fid_q2,
-                #     'pos_B': None,                                                                                      # FIXME: Useful for extra statistics to plot, would need to pass which slot was used for measurement
-                #     'fid_joint': fid_joint
-                # }
-                result = {
-                    'pos_A': None,                                                                                      # FIXME: Useful for extra statistics to plot, would need to pass which slot was used for measurement
-                    'pos_B': None,                                                                                      # FIXME: Useful for extra statistics to plot, would need to pass which slot was used for measurement
-                    'fid_joint': fid_joint
-                }
-                self.send_signal(Signals.SUCCESS, result=result)
+
+            fid_joint = qapi.fidelity([q1,q2], ks.s11, squared=True)                                                    # measure joint fidelity (compared to emitted 's1' state) of qubits once they were marked for measurement
+            result = {
+                'pos_A': None,                                                                                          # FIXME: Useful for extra statistics to plot, would need to pass which slot was used for measurement
+                'pos_B': None,                                                                                          # FIXME: Useful for extra statistics to plot, would need to pass which slot was used for measurement
+                'fid_joint': fid_joint
+            }
+            self.send_signal(Signals.SUCCESS, result=result)
